@@ -1,0 +1,1 @@
+ALTER TABLE print_orders ADD COLUMN IF NOT EXISTS config_layout text DEFAULT 'Portrait';
