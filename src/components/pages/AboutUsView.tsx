@@ -295,10 +295,6 @@ export const AboutUsView: React.FC<AboutUsViewProps> = ({
             <ul className="space-y-2 text-xs text-slate-600">
               <li className="flex items-center gap-2">
                 <span className="w-1.5 h-1.5 rounded-full bg-[#0070BA]" />
-                <span><strong className="text-slate-900">Dattatray Bejgamar</strong> — Head of Growth & Strategic Partnerships</span>
-              </li>
-              <li className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#0070BA]" />
                 <span><strong className="text-slate-900">Shravan Patil</strong> — Data Analytics & Merchant Operations</span>
               </li>
             </ul>

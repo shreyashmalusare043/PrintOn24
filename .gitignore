@@ -38,3 +38,5 @@ history/*.json
 /supabase/secrets/
 .native-wind-cache
 .vite
+
+.env

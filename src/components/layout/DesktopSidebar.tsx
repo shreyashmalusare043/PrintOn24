@@ -1,22 +1,22 @@
-import React from 'react';
 import {
-  Home,
-  Printer,
-  Receipt,
-  Crown,
+  ArrowRight,
   BarChart3,
   Bell,
-  Info,
-  ShieldCheck,
-  FileText,
-  Settings,
   Briefcase,
-  MessageSquare,
-  Megaphone,
-  Phone,
   ChevronRight,
-  ArrowRight,
+  Crown,
+  FileText,
+  Home,
+  Info,
+  Megaphone,
+  MessageSquare,
+  Phone,
+  Printer,
+  Receipt,
+  Settings,
+  ShieldCheck,
 } from 'lucide-react';
+import React from 'react';
 import { usePrintPerfect } from '../../contexts/PrintPerfectContext';
 import { DEFAULT_GUEST_PROFILE_PHOTO } from '../../types/printperfect';
 

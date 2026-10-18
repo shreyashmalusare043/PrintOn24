@@ -116,6 +116,30 @@ const PrintPerfectAppContent: React.FC = () => {
       setCurrentView('checkout');
     }
 
+    const shopkeeperMatch = window.location.pathname.match(/^\/shopkeeper\/([^/]+)\/?$/i);
+    if (shopkeeperMatch && enterprises.length > 0) {
+      let shopCode: string;
+      try {
+        shopCode = decodeURIComponent(shopkeeperMatch[1]);
+      } catch {
+        toast.error('This shopkeeper link contains an invalid code.');
+        return;
+      }
+      const found = enterprises.find(
+        e => e.id === shopCode || e.terminalCode.toLowerCase() === shopCode.toLowerCase()
+      );
+
+      if (found) {
+        selectEnterprise(found.id);
+        setActiveTab('upload');
+        setCurrentView('upload');
+        toast.success(`Connected to ${found.name} via shopkeeper link!`);
+      } else {
+        toast.error(`Shopkeeper code "${shopCode}" was not found.`);
+      }
+      return;
+    }
+
     // Auto-connect shop via counter QR scan parameters (?shop=..., ?shopId=..., ?terminal=..., ?qr=...)
     const shopParam = params.get('shop') || params.get('shopId') || params.get('terminal') || params.get('qr');
     if (shopParam && enterprises.length > 0) {

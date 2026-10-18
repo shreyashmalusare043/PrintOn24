@@ -158,9 +158,9 @@ export const ScanView: React.FC<ScanViewProps> = ({ onProceedToUpload }) => {
       const clean = decodedText.trim();
       if (!clean) return;
 
-      // Extract shop code if encoded as URL e.g. https://copygo.in/shop/PUNE-HE-01 or copygo:PUNE-HE-01
+      // Extract shop code if encoded as URL e.g. https://www.printon24.in/shop/PUNE-HE-01 or printon24:PUNE-HE-01
       let targetCode = clean;
-      const urlMatch = clean.match(/(?:shop|terminal|counter)\/([A-Za-z0-9_-]+)/i);
+      const urlMatch = clean.match(/(?:shopkeeper|shop|terminal|counter)\/([A-Za-z0-9_-]+)/i);
       if (urlMatch && urlMatch[1]) {
         targetCode = urlMatch[1];
       } else if (clean.includes(':')) {
@@ -173,14 +173,17 @@ export const ScanView: React.FC<ScanViewProps> = ({ onProceedToUpload }) => {
       const res = await verifyAndSelectShopByCode(targetCode);
       setIsValidating(false);
 
-      if (res.success && res.shop) {
+      const shop = res.shop;
+      if (res.success && shop) {
         hasTriggeredPair.current = true;
         playScanChime();
         stopCameraStream();
         setIsDetected(true);
-        toast.success(`QR Scanned: Connected to ${res.shop.name} (${res.shop.terminalCode})!`);
+        toast.success(`QR Scanned: Connected to ${shop.name} (${shop.terminalCode})!`);
         setTimeout(() => {
-          onProceedToUpload();
+          window.location.assign(
+            `${window.location.origin}/shopkeeper/${encodeURIComponent(shop.terminalCode)}`
+          );
         }, 500);
       } else {
         toast.error(
