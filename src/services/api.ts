@@ -195,6 +195,173 @@ export interface RemoteShopData {
   logoUrl?: string;
   membershipEnabled?: boolean;
   membershipPrice?: number;
+  pricing?: PrintEnterprise['pricing'];
+}
+
+type ShopPricingRow = {
+  shop_id: string;
+  bw_single?: number | string | null;
+  color_single?: number | string | null;
+  bw_double?: number | string | null;
+  color_double?: number | string | null;
+  bond_rate?: number | string | null;
+  glossy_rate?: number | string | null;
+  dynamic_paper_types?: unknown;
+  [column: string]: unknown;
+};
+
+const DEFAULT_SHOP_PRINT_PRICING: PrintEnterprise['pricing'] = {
+  blackAndWhite: 0,
+  colour: 0,
+  blackAndWhiteDouble: undefined,
+  colourDouble: undefined,
+  isConfigured: false,
+  costone: 0,
+  bondPaperExtra: 0,
+  glossyPaperExtra: 0,
+  a3Multiplier: 1,
+  a2Multiplier: 1
+};
+
+function optionalShopRate(value: unknown): number | undefined {
+  if (value === null || value === undefined || value === '') return undefined;
+  const rate = Number(value);
+  return Number.isFinite(rate) && rate >= 0 ? rate : undefined;
+}
+
+function mapDynamicPaperTypes(value: unknown): NonNullable<PrintEnterprise['pricing']['dynamicPaperTypes']> {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap(item => {
+    if (!item || typeof item !== 'object') return [];
+    const row = item as Record<string, unknown>;
+    const name = typeof row.name === 'string' ? row.name.trim() : '';
+    if (!name || row.is_active === false || row.is_enabled === false) return [];
+    return [{
+      name,
+      bwPrice: optionalShopRate(row.bw_price ?? row.bw_single ?? row.black_and_white_price),
+      colorPrice: optionalShopRate(row.color_price ?? row.color_single ?? row.colour_price),
+      bwDoublePrice: optionalShopRate(row.bw_double ?? row.bw_double_price),
+      colorDoublePrice: optionalShopRate(row.color_double ?? row.color_double_price),
+      costonePrice: optionalShopRate(row.costone_price),
+      costoneDoublePrice: optionalShopRate(row.costone_double ?? row.costone_double_price)
+    }];
+  });
+}
+
+function mapShopPricing(
+  row: ShopPricingRow | null | undefined,
+  shopId?: string,
+  fallback: PrintEnterprise['pricing'] = DEFAULT_SHOP_PRINT_PRICING
+): PrintEnterprise['pricing'] {
+  if (!row) return { ...fallback, shopId, isConfigured: false, dynamicPaperTypes: [] };
+
+  const paperSizeRates: NonNullable<PrintEnterprise['pricing']['paperSizeRates']> = {
+    A4: {
+      bwSingle: optionalShopRate(row.bw_single),
+      colorSingle: optionalShopRate(row.color_single),
+      bwDouble: optionalShopRate(row.bw_double),
+      colorDouble: optionalShopRate(row.color_double)
+    }
+  };
+
+  const a4BwRate = optionalShopRate(row.a4_rate);
+  if (a4BwRate !== undefined && a4BwRate > 0) {
+    paperSizeRates.A4.bwSingle = a4BwRate;
+  }
+
+  const a3BwRate = optionalShopRate(row.a3_rate);
+  if (a3BwRate !== undefined && a3BwRate > 0) {
+    paperSizeRates.A3 = { bwSingle: a3BwRate };
+  }
+
+  const configuredSizeNames = ['A2', 'A3', 'A4', 'A5', 'Letter', 'Legal', 'Executive'];
+  configuredSizeNames.forEach(size => {
+    const key = size.toLowerCase();
+    const sizeRates = paperSizeRates[size] || {};
+    const readSizeRate = (mode: 'bw' | 'color', side: 'single' | 'double') => {
+      const names = [
+        `${key}_${mode}_${side}`,
+        `${mode}_${side}_${key}`,
+        `${key}_${mode}_${side}_rate`,
+        `${mode}_${side}_${key}_rate`,
+        `${key}_${mode}_${side}_price`,
+        `${mode}_${side}_${key}_price`
+      ];
+      for (const name of names) {
+        const rate = optionalShopRate(row[name]);
+        if (rate !== undefined) return rate;
+      }
+      return undefined;
+    };
+
+    const bwSingle = readSizeRate('bw', 'single');
+    const colorSingle = readSizeRate('color', 'single');
+    const bwDouble = readSizeRate('bw', 'double');
+    const colorDouble = readSizeRate('color', 'double');
+    const costoneSingle = optionalShopRate(row[`${key}_costone_single`] ?? row[`costone_single_${key}`]);
+    const costoneDouble = optionalShopRate(row[`${key}_costone_double`] ?? row[`costone_double_${key}`]);
+    if (bwSingle !== undefined || colorSingle !== undefined || bwDouble !== undefined || colorDouble !== undefined || costoneSingle !== undefined || costoneDouble !== undefined) {
+      paperSizeRates[size] = {
+        ...sizeRates,
+        bwSingle: bwSingle ?? sizeRates.bwSingle,
+        colorSingle: colorSingle ?? sizeRates.colorSingle,
+        bwDouble: bwDouble ?? sizeRates.bwDouble,
+        colorDouble: colorDouble ?? sizeRates.colorDouble,
+        costoneSingle: costoneSingle ?? sizeRates.costoneSingle,
+        costoneDouble: costoneDouble ?? sizeRates.costoneDouble
+      };
+    }
+  });
+
+  const dynamicPaperTypes = mapDynamicPaperTypes(row.dynamic_paper_types);
+  dynamicPaperTypes.forEach(paper => {
+    const matchesSize = configuredSizeNames.find(size => size.toLowerCase() === paper.name.toLowerCase());
+    if (matchesSize) {
+      const existingRates = paperSizeRates[matchesSize] || {};
+      const preferConfiguredRate = (configured: number | undefined, dynamic: number | undefined) =>
+        configured === undefined || (configured === 0 && dynamic !== undefined && dynamic > 0)
+          ? dynamic ?? configured
+          : configured;
+      paperSizeRates[matchesSize] = {
+        bwSingle: preferConfiguredRate(existingRates.bwSingle, paper.bwPrice),
+        colorSingle: preferConfiguredRate(existingRates.colorSingle, paper.colorPrice),
+        bwDouble: preferConfiguredRate(existingRates.bwDouble, paper.bwDoublePrice),
+        colorDouble: preferConfiguredRate(existingRates.colorDouble, paper.colorDoublePrice),
+        costoneSingle: preferConfiguredRate(existingRates.costoneSingle, paper.costonePrice),
+        costoneDouble: preferConfiguredRate(existingRates.costoneDouble, paper.costoneDoublePrice)
+      };
+    }
+  });
+
+  const hasConfiguredRates = Object.values(paperSizeRates).some(rates =>
+    Object.values(rates).some(rate => rate !== undefined)
+  ) || dynamicPaperTypes.some(paper =>
+    paper.bwPrice !== undefined ||
+    paper.colorPrice !== undefined ||
+    paper.bwDoublePrice !== undefined ||
+    paper.colorDoublePrice !== undefined ||
+    paper.costonePrice !== undefined ||
+    paper.costoneDoublePrice !== undefined
+  ) || optionalShopRate(row.bond_rate) !== undefined || optionalShopRate(row.glossy_rate) !== undefined;
+
+  return {
+    blackAndWhite: optionalShopRate(row.bw_single) ?? 0,
+    colour: optionalShopRate(row.color_single) ?? 0,
+    blackAndWhiteDouble: optionalShopRate(row.bw_double),
+    colourDouble: optionalShopRate(row.color_double),
+    shopId: row.shop_id || shopId,
+    isConfigured: hasConfiguredRates,
+    bondPaperRate: optionalShopRate(row.bond_rate),
+    glossyPaperRate: optionalShopRate(row.glossy_rate),
+    paperSizeRates,
+    dynamicPaperTypes,
+    costone: optionalShopRate(row.costone_single) ?? 0,
+    costoneDouble: optionalShopRate(row.costone_double),
+    bondPaperExtra: 0,
+    glossyPaperExtra: 0,
+    a3Multiplier: 1,
+    a2Multiplier: 1
+  };
 }
 
 export async function getPrintShops(): Promise<RemoteShopData[]> {
@@ -208,6 +375,19 @@ export async function getPrintShops(): Promise<RemoteShopData[]> {
     if (error || !Array.isArray(data) || data.length === 0) {
       return [];
     }
+
+    const shopIds = data.map((shop: any) => shop.id).filter(Boolean);
+    const { data: pricingRows, error: pricingError } = await supabase
+      .from('shop_pricing')
+      .select('*')
+      .in('shop_id', shopIds);
+
+    if (pricingError) {
+      throw pricingError;
+    }
+
+    const pricingByShopId = new Map<string, ShopPricingRow>();
+    pricingRows?.forEach((row: any) => pricingByShopId.set(row.shop_id, row as ShopPricingRow));
 
     return data
       .filter((shop: any) => shop.status !== 'inactive' && shop.status !== 'disabled' && shop.is_open !== false)
@@ -225,7 +405,8 @@ export async function getPrintShops(): Promise<RemoteShopData[]> {
         ownerName: shop.owner_name || 'Partner Manager',
         logoUrl: shop.logo_url || '',
         membershipEnabled: shop.membership_enabled ?? false,
-        membershipPrice: shop.membership_price ? Number(shop.membership_price) : 99
+        membershipPrice: shop.membership_price ? Number(shop.membership_price) : 99,
+        pricing: mapShopPricing(pricingByShopId.get(shop.id), shop.id)
       }));
   } catch (err) {
     console.error('getPrintShops exception:', err);
@@ -294,23 +475,41 @@ export async function fetchShopByTerminalCode(code: string): Promise<PrintEnterp
       if (fallbackData.status === 'inactive' || fallbackData.status === 'disabled' || fallbackData.is_open === false) {
         return null;
       }
-      return mapDbShopToEnterprise(fallbackData);
+      return mapDbShopToEnterprise(fallbackData, await getShopPricingRecord(fallbackData.id));
     }
 
     if (data.status === 'inactive' || data.status === 'disabled' || data.is_open === false) {
       return null;
     }
 
-    return mapDbShopToEnterprise(data);
+    return mapDbShopToEnterprise(data, await getShopPricingRecord(data.id));
   } catch (err) {
     console.error('fetchShopByTerminalCode error:', err);
     return null;
   }
 }
 
+async function getShopPricingRecord(shopId: string): Promise<ShopPricingRow | null> {
+  const { data, error } = await supabase
+    .from('shop_pricing')
+    .select('*')
+    .eq('shop_id', shopId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+  return data as ShopPricingRow | null;
+}
+
+export async function getShopPrintPricing(shopId: string): Promise<PrintEnterprise['pricing']> {
+  const row = await getShopPricingRecord(shopId);
+  return mapShopPricing(row, shopId);
+}
+
 import { getShopInitials } from '../utils/shopInitials';
 
-export function mapDbShopToEnterprise(shop: any): PrintEnterprise {
+export function mapDbShopToEnterprise(shop: any, shopPricing?: ShopPricingRow | null): PrintEnterprise {
   const dynamicInitials = getShopInitials(shop.name);
   return {
     id: shop.id,
@@ -328,15 +527,7 @@ export function mapDbShopToEnterprise(shop: any): PrintEnterprise {
     initials: dynamicInitials,
     logoUrl: shop.logo_url || shop.logoUrl || '',
     paymentMethodConfig: shop.payment_method_config || 'both',
-    pricing: {
-      blackAndWhite: 2.0,
-      colour: 5.0,
-      costone: 3.5,
-      bondPaperExtra: 1.5,
-      glossyPaperExtra: 3.0,
-      a3Multiplier: 1.8,
-      a2Multiplier: 3.2
-    }
+    pricing: mapShopPricing(shopPricing, shop.id)
   };
 }
 
@@ -549,7 +740,7 @@ export async function getShopPrinters(shopId: string): Promise<ShopPrinterInfo[]
  */
 export interface ShopPaperPricingInfo {
   sizes: string[];
-  paperPrices: Record<string, { bwPrice: number; colorPrice: number }>;
+  paperPrices: Record<string, { bwPrice?: number; colorPrice?: number }>;
 }
 
 export async function getShopAvailablePaperSizes(shopId: string): Promise<string[]> {
@@ -558,72 +749,77 @@ export async function getShopAvailablePaperSizes(shopId: string): Promise<string
     return info.sizes;
   } catch (err) {
     console.error('getShopAvailablePaperSizes error:', err);
-    return ['A4'];
+    return [];
   }
 }
 
 export async function getShopPaperPricingDetails(shopId: string): Promise<ShopPaperPricingInfo> {
   const sizesSet = new Set<string>();
-  const paperPrices: Record<string, { bwPrice: number; colorPrice: number }> = {};
+  const paperPrices: Record<string, { bwPrice?: number; colorPrice?: number }> = {};
 
   if (!shopId) {
-    return { sizes: ['A4'], paperPrices: {} };
+    return { sizes: [], paperPrices: {} };
   }
 
   try {
-    // 1. Check shop_pricing for enabled paper rates and active dynamic paper types
-    const { data: pricing } = await supabase
+    const { data: pricing, error: pricingError } = await supabase
       .from('shop_pricing')
       .select('*')
       .eq('shop_id', shopId)
       .maybeSingle();
+    if (pricingError) throw pricingError;
 
     if (pricing) {
-      const defaultBw = typeof pricing.bw_rate === 'number' ? pricing.bw_rate : 2;
-      const defaultColor = typeof pricing.color_rate === 'number' ? pricing.color_rate : 10;
-
-      if (pricing.a4_rate !== null && pricing.a4_rate !== undefined && pricing.a4_rate > 0) {
+      const mapped = mapShopPricing(pricing as ShopPricingRow, shopId);
+      const baseRates = mapped.paperSizeRates?.A4;
+      if (baseRates?.bwSingle !== undefined || baseRates?.colorSingle !== undefined) {
         sizesSet.add('A4');
-        paperPrices['A4'] = { bwPrice: Number(pricing.a4_rate), colorPrice: defaultColor };
-      }
-      if (pricing.a3_rate !== null && pricing.a3_rate !== undefined && pricing.a3_rate > 0) {
-        sizesSet.add('A3');
-        paperPrices['A3'] = { bwPrice: Number(pricing.a3_rate), colorPrice: defaultColor * (pricing.a3_multiplier || 2) };
-      }
-      if (pricing.bond_rate !== null && pricing.bond_rate !== undefined && pricing.bond_rate > 0) {
-        sizesSet.add('Bond');
-        paperPrices['Bond'] = { bwPrice: Number(pricing.bond_rate), colorPrice: defaultColor + Number(pricing.bond_rate) };
-      }
-      if (pricing.glossy_rate !== null && pricing.glossy_rate !== undefined && pricing.glossy_rate > 0) {
-        sizesSet.add('Glossy');
-        paperPrices['Glossy'] = { bwPrice: Number(pricing.glossy_rate), colorPrice: defaultColor + Number(pricing.glossy_rate) };
+        paperPrices.A4 = { bwPrice: baseRates.bwSingle, colorPrice: baseRates.colorSingle };
       }
 
-      // Check dynamic_paper_types: ensure inactive/disabled/deleted options are filtered out
-      if (Array.isArray(pricing.dynamic_paper_types)) {
-        pricing.dynamic_paper_types.forEach((pt: any) => {
-          if (pt?.name && pt?.is_active !== false) {
-            sizesSet.add(pt.name);
-            paperPrices[pt.name] = {
-              bwPrice: typeof pt.bw_price === 'number' ? pt.bw_price : defaultBw,
-              colorPrice: typeof pt.color_price === 'number' ? pt.color_price : defaultColor
-            };
-          }
-        });
+      Object.entries(mapped.paperSizeRates || {}).forEach(([size, rates]) => {
+        if (size !== 'A4' && (rates.bwSingle !== undefined || rates.colorSingle !== undefined)) {
+          sizesSet.add(size);
+          paperPrices[size] = { bwPrice: rates.bwSingle, colorPrice: rates.colorSingle };
+        }
+      });
+
+      mapped.dynamicPaperTypes?.forEach(paper => {
+        if (paper.bwPrice !== undefined || paper.colorPrice !== undefined) {
+          sizesSet.add(paper.name);
+          paperPrices[paper.name] = { bwPrice: paper.bwPrice, colorPrice: paper.colorPrice };
+        }
+      });
+
+      if (mapped.bondPaperRate !== undefined && baseRates?.bwSingle !== undefined && baseRates.colorSingle !== undefined) {
+        sizesSet.add('Bond');
+        paperPrices.Bond = {
+          bwPrice: baseRates.bwSingle + mapped.bondPaperRate,
+          colorPrice: baseRates.colorSingle + mapped.bondPaperRate
+        };
+      }
+      if (mapped.glossyPaperRate !== undefined && baseRates?.bwSingle !== undefined && baseRates.colorSingle !== undefined) {
+        sizesSet.add('Glossy');
+        paperPrices.Glossy = {
+          bwPrice: baseRates.bwSingle + mapped.glossyPaperRate,
+          colorPrice: baseRates.colorSingle + mapped.glossyPaperRate
+        };
       }
     }
 
-    // 2. Check shop_printers for supported paper sizes
-    const { data: printers } = await supabase
+    // A printer supporting a size does not make that size chargeable without a configured rate.
+    const { data: printers, error: printersError } = await supabase
       .from('shop_printers')
       .select('paper_sizes, status')
       .eq('shop_id', shopId);
+    if (printersError) throw printersError;
 
     if (Array.isArray(printers)) {
       printers.forEach(p => {
         if (p.status !== 'inactive' && p.status !== 'disabled' && Array.isArray(p.paper_sizes)) {
           p.paper_sizes.forEach((s: string) => {
-            if (s && s.trim()) sizesSet.add(s.trim());
+            const size = s?.trim();
+            if (size && paperPrices[size]) sizesSet.add(size);
           });
         }
       });
@@ -643,11 +839,10 @@ export async function getShopPaperPricingDetails(shopId: string): Promise<ShopPa
       return { sizes: sorted, paperPrices };
     }
 
-    // If shop has no explicit record yet, return empty list so UI prompts valid selection
     return { sizes: [], paperPrices: {} };
   } catch (err) {
     console.error('getShopPaperPricingDetails error:', err);
-    return { sizes: ['A4'], paperPrices: {} };
+    throw err;
   }
 }
 
@@ -1341,4 +1536,3 @@ export async function fetchUserNotificationsPreference(userId: string): Promise<
     return true; // Default ON
   }
 }
-

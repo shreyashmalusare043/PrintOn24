@@ -154,6 +154,12 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
       return;
     }
 
+    if (!priceCalc.isValid) {
+      toast.error(priceCalc.error || 'The selected shop has not configured a valid price for this print setup.');
+      onBack();
+      return;
+    }
+
     // Readiness gate: Block payment if any document has incomplete or invalid configuration
     const allDocs = uploadedDocs.length > 0 ? uploadedDocs : (currentDoc ? [currentDoc] : []);
     const invalidDocs = allDocs.filter(d => !isDocConfigValid(d).isValid);
@@ -382,7 +388,9 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
           </div>
           <div className="bg-red-50 p-2 rounded-xl border border-red-100">
             <span className="text-[10px] text-[#FF1300] block font-semibold uppercase">Final Total</span>
-            <span className="text-sm font-black text-[#FF1300] font-heading">₹{priceCalc.grandTotal.toFixed(2)}</span>
+            <span className="text-sm font-black text-[#FF1300] font-heading">
+              {priceCalc.isValid ? `₹${priceCalc.grandTotal.toFixed(2)}` : '—'}
+            </span>
           </div>
         </div>
 
@@ -551,7 +559,7 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
       {/* 17. Go For Print Button */}
       <button
         type="button"
-        disabled={isProcessing}
+        disabled={isProcessing || !priceCalc.isValid}
         onClick={handleGoForPrint}
         className="w-full py-4 rounded-full bg-[#FF1300] hover:bg-[#E01100] disabled:opacity-75 active:scale-95 text-white text-sm font-extrabold flex items-center justify-center gap-2 shadow-xl shadow-red-500/30 transition-all font-heading"
       >
@@ -563,7 +571,7 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
         ) : (
           <>
             <Printer className="w-5 h-5 stroke-[2.2]" />
-            <span>Go For Print • ₹{priceCalc.grandTotal.toFixed(2)}</span>
+            <span>{priceCalc.isValid ? `Go For Print • ₹${priceCalc.grandTotal.toFixed(2)}` : 'Shop pricing unavailable'}</span>
             <ArrowRight className="w-4 h-4" />
           </>
         )}

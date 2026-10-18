@@ -55,7 +55,31 @@ export interface PrintEnterprise {
   pricing: {
     blackAndWhite: number; // base rate per single side
     colour: number;
+    blackAndWhiteDouble?: number;
+    colourDouble?: number;
+    shopId?: string;
+    isConfigured?: boolean;
+    bondPaperRate?: number;
+    glossyPaperRate?: number;
+    paperSizeRates?: Record<string, {
+      bwSingle?: number;
+      colorSingle?: number;
+      bwDouble?: number;
+      colorDouble?: number;
+      costoneSingle?: number;
+      costoneDouble?: number;
+    }>;
+    dynamicPaperTypes?: Array<{
+      name: string;
+      bwPrice?: number;
+      colorPrice?: number;
+      bwDoublePrice?: number;
+      colorDoublePrice?: number;
+      costonePrice?: number;
+      costoneDoublePrice?: number;
+    }>;
     costone: number;
+    costoneDouble?: number;
     bondPaperExtra: number;
     glossyPaperExtra: number;
     a3Multiplier: number;

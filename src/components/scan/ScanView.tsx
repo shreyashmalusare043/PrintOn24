@@ -796,14 +796,14 @@ export const ScanView: React.FC<ScanViewProps> = ({ onProceedToUpload }) => {
             <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/80">
               <span className="text-slate-400 block text-[10px] font-semibold">B&W RATE</span>
               <span className="font-bold text-[#FF1300]">
-                ₹{selectedEnterprise.pricing.blackAndWhite.toFixed(2)} / page
+                {selectedEnterprise.pricing.isConfigured ? `₹${selectedEnterprise.pricing.blackAndWhite.toFixed(2)} / page` : '—'}
               </span>
             </div>
 
             <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/80">
               <span className="text-slate-400 block text-[10px] font-semibold">COLOR RATE</span>
               <span className="font-bold text-[#FF1300]">
-                ₹{selectedEnterprise.pricing.colour.toFixed(2)} / page
+                {selectedEnterprise.pricing.isConfigured ? `₹${selectedEnterprise.pricing.colour.toFixed(2)} / page` : '—'}
               </span>
             </div>
           </div>

@@ -509,6 +509,11 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
       return;
     }
 
+    if (!priceCalc.isValid) {
+      toast.error(priceCalc.error || 'The selected shop has not configured a valid price for this print setup.');
+      return;
+    }
+
     // Open Terms & Conditions modal before print checkout
     setIsTermsModalOpen(true);
   };
@@ -831,7 +836,8 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                   const docPrice = getDocPrice(doc);
                   const activeDoc = isCurrent ? { ...doc, printConfig } : doc;
                   const docValidation = isDocConfigValid(activeDoc);
-                  const isReady = docValidation.isValid;
+                  const isReady = docValidation.isValid && docPrice.isValid;
+                  const docError = !docValidation.isValid ? docValidation.error : docPrice.error;
 
                   return (
                     <div
@@ -877,7 +883,7 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                                 <span>✓ Configured</span>
                               </span>
                             ) : (
-                              <span className="text-[9px] font-black uppercase tracking-wider text-[#FF1300] bg-red-100 px-1.5 py-0.5 rounded-full flex items-center gap-1 shrink-0" title={docValidation.error}>
+                              <span className="text-[9px] font-black uppercase tracking-wider text-[#FF1300] bg-red-100 px-1.5 py-0.5 rounded-full flex items-center gap-1 shrink-0" title={docError}>
                                 <AlertCircle className="w-2.5 h-2.5" />
                                 <span>Needs Config</span>
                               </span>
@@ -897,7 +903,7 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                               {docCfg.printType} • {docCfg.sides} • {docCfg.copies}x • {docCfg.pageSize}
                             </span>
                             <span className={`font-black px-1.5 py-0.5 rounded border ${isReady ? 'text-emerald-700 bg-emerald-50 border-emerald-200' : 'text-[#FF1300] bg-red-50 border-red-100'}`}>
-                              ₹{docPrice.subtotal.toFixed(2)}
+                              {docPrice.isValid ? `₹${docPrice.subtotal.toFixed(2)}` : '—'}
                             </span>
                           </div>
                         </div>
@@ -1745,7 +1751,7 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
           <div className="bg-white/80 p-2 rounded-xl border border-red-100">
             <p className="text-[10px] font-semibold text-slate-400 uppercase">Final Total</p>
             <p className="text-base font-black text-[#FF1300] font-heading">
-              ₹{priceCalc.grandTotal.toFixed(2)}
+              {priceCalc.isValid ? `₹${priceCalc.grandTotal.toFixed(2)}` : '—'}
             </p>
           </div>
         </div>
@@ -1756,7 +1762,7 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
               Active: <strong className="text-slate-900">{currentDoc.fileName}</strong>
             </span>
             <span className="font-bold text-[#FF1300] shrink-0">
-              ₹{currentDocPriceCalc.grandTotal.toFixed(2)}
+              {currentDocPriceCalc.isValid ? `₹${currentDocPriceCalc.grandTotal.toFixed(2)}` : '—'}
             </span>
           </div>
         )}

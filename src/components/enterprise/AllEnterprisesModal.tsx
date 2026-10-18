@@ -215,9 +215,9 @@ export const AllEnterprisesModal: React.FC<AllEnterprisesModalProps> = ({
                             {enterprise.rating}
                           </span>
                           <span>•</span>
-                          <span className="text-slate-700">B&W: ₹{enterprise.pricing.blackAndWhite}/pg</span>
+                          <span className="text-slate-700">B&W: {enterprise.pricing.isConfigured ? `₹${enterprise.pricing.blackAndWhite}/pg` : '—'}</span>
                           <span>•</span>
-                          <span className="text-slate-700">Color: ₹{enterprise.pricing.colour}/pg</span>
+                          <span className="text-slate-700">Color: {enterprise.pricing.isConfigured ? `₹${enterprise.pricing.colour}/pg` : '—'}</span>
                         </div>
                       </div>
                     </div>

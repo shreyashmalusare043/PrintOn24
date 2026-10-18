@@ -41,6 +41,7 @@ import {
   getOrCreateUserProfile,
   updateUserProfile as apiUpdateUserProfile,
   getPrintShops,
+  getShopPrintPricing,
   getUserOrders,
   getUserNotifications,
   createDatabaseOrder,
@@ -59,6 +60,8 @@ interface PriceCalculation {
   discount: number;
   tax: number;
   grandTotal: number;
+  isValid: boolean;
+  error?: string;
 }
 
 // Page Range and Custom Range Validation Helpers (Top-level Module Scope)
@@ -516,7 +519,31 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
     // Load remote print shops
     getPrintShops().then(remoteShops => {
-      if (isMounted && remoteShops.length > 0) {
+      if (!isMounted) return;
+
+      const previouslySelectedShop = enterprises.find(shop => shop.id === selectedEnterpriseId);
+      const selectedRemoteShop = remoteShops.find(
+        shop =>
+          shop.id === selectedEnterpriseId ||
+          (previouslySelectedShop?.terminalCode &&
+            shop.terminalCode === previouslySelectedShop.terminalCode)
+      );
+
+      if (
+        previouslySelectedShop &&
+        !selectedRemoteShop &&
+        INITIAL_ENTERPRISES.some(shop => shop.id === selectedEnterpriseId)
+      ) {
+        setSelectedEnterpriseId(null);
+        localStorage.removeItem('printperfect_selected_ent');
+      }
+
+      if (remoteShops.length > 0) {
+        if (selectedRemoteShop && selectedRemoteShop.id !== selectedEnterpriseId) {
+          setSelectedEnterpriseId(selectedRemoteShop.id);
+          localStorage.setItem('printperfect_selected_ent', selectedRemoteShop.id);
+        }
+
         setEnterprises(prev => {
           const merged = [...prev];
           remoteShops.forEach(rs => {
@@ -524,6 +551,7 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
             if (idx >= 0) {
               merged[idx] = {
                 ...merged[idx],
+                id: rs.id,
                 name: rs.name,
                 address: rs.address,
                 terminalCode: rs.terminalCode,
@@ -532,7 +560,8 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
                 rating: rs.rating,
                 logoUrl: rs.logoUrl || merged[idx].logoUrl || '',
                 membershipEnabled: rs.membershipEnabled,
-                membershipPrice: rs.membershipPrice
+                membershipPrice: rs.membershipPrice,
+                pricing: rs.pricing || merged[idx].pricing
               };
             } else {
               merged.push({
@@ -546,7 +575,8 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
                 rating: rs.rating,
                 logoUrl: rs.logoUrl || '',
                 membershipEnabled: rs.membershipEnabled,
-                membershipPrice: rs.membershipPrice
+                membershipPrice: rs.membershipPrice,
+                pricing: rs.pricing || merged[0].pricing
               });
             }
           });
@@ -692,6 +722,45 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
   );
 
   const selectedEnterprise = (selectedEnterpriseId && enterprises.find(e => e.id === selectedEnterpriseId)) || enterprises[0];
+
+  useEffect(() => {
+    if (!selectedEnterpriseId) return;
+
+    let isCurrent = true;
+    setEnterprises(current =>
+      current.map(enterprise =>
+        enterprise.id === selectedEnterpriseId
+          ? {
+              ...enterprise,
+              pricing: {
+                ...enterprise.pricing,
+                shopId: selectedEnterpriseId,
+                isConfigured: false
+              }
+            }
+          : enterprise
+      )
+    );
+
+    getShopPrintPricing(selectedEnterpriseId)
+      .then(pricing => {
+        if (!isCurrent) return;
+        setEnterprises(current =>
+          current.map(enterprise =>
+            enterprise.id === selectedEnterpriseId
+              ? { ...enterprise, pricing }
+              : enterprise
+          )
+        );
+      })
+      .catch(error => {
+        console.error('Failed to refresh selected shop pricing:', error);
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [selectedEnterpriseId]);
 
   const selectEnterprise = (enterpriseId: string) => {
     setSelectedEnterpriseId(enterpriseId);
@@ -1514,6 +1583,23 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
     doc: UploadedDoc,
     cfg: PrintConfig
   ): PriceCalculation => {
+    const invalidPrice = (error: string): PriceCalculation => ({
+      effectivePages: 0,
+      sheetsUsed: 0,
+      baseRatePerSide: 0,
+      subtotal: 0,
+      discount: 0,
+      tax: 0,
+      grandTotal: 0,
+      isValid: false,
+      error
+    });
+
+    const pricing = selectedEnterprise.pricing;
+    if (!pricing.isConfigured || pricing.shopId !== selectedEnterprise.id) {
+      return invalidPrice(`Pricing for ${selectedEnterprise.name} is not available yet.`);
+    }
+
     let effectivePages = doc.totalPages || 1;
     const isCustomRange = cfg.pageRangeType === 'Custom Range';
     const isSelectedPages = cfg.pageRangeType === 'Selected Pages' || cfg.pageRangeType === 'Selected pages';
@@ -1523,8 +1609,12 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
       if (selValidation.isValid) {
         effectivePages = Math.max(1, selValidation.pageCount);
       } else {
-        effectivePages = 0;
+        return invalidPrice(selValidation.error || 'The selected page range is invalid.');
       }
+    }
+
+    if (effectivePages < 1) {
+      return invalidPrice('Select at least one page to print.');
     }
 
     // layout sheet compression
@@ -1533,25 +1623,64 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
     if (cfg.pagesPerSheet === '4-in-1') layoutFactor = 4;
     const compressedPages = Math.max(1, Math.ceil(effectivePages / layoutFactor));
 
-    // Base rate per side
-    const isBW = cfg.printType === 'Black & White' || cfg.printType === 'B&W';
-    let baseRate = isBW ? selectedEnterprise.pricing.blackAndWhite : selectedEnterprise.pricing.colour;
+    const isBackToBack = (sides: string) => sides === 'Back to Back' || sides === 'Back-to-Back';
+    const normalizePaperName = (value: string) => value.toLowerCase().replace(/\s+paper$/, '').trim();
+    const resolvePageRate = (printType: string, sides: string): number | null => {
+      const isBW = printType === 'Black & White' || printType === 'B&W';
+      const isCostone = printType === 'Costone';
+      const doubleSide = isBackToBack(sides);
+      const typeName = normalizePaperName(cfg.paperType);
+      const selectedPageSize = String(cfg.pageSize);
+      const sizeName = normalizePaperName(selectedPageSize);
+      const paperDynamicType = pricing.dynamicPaperTypes?.find(
+        paper => normalizePaperName(paper.name) === typeName
+      );
+      const sizeDynamicType = pricing.dynamicPaperTypes?.find(
+        paper => normalizePaperName(paper.name) === sizeName
+      );
 
-    // Paper type add-on
-    if (cfg.paperType === 'Bond Paper') {
-      baseRate += selectedEnterprise.pricing.bondPaperExtra;
-    } else if (cfg.paperType === 'Glossy') {
-      baseRate += selectedEnterprise.pricing.glossyPaperExtra;
+      const getDynamicRate = (dynamicType: typeof paperDynamicType) => {
+        if (!dynamicType) return undefined;
+        const rate = isCostone
+          ? doubleSide ? dynamicType.costoneDoublePrice : dynamicType.costonePrice
+          : isBW
+            ? doubleSide ? dynamicType.bwDoublePrice : dynamicType.bwPrice
+            : doubleSide ? dynamicType.colorDoublePrice : dynamicType.colorPrice;
+        return rate !== undefined && Number.isFinite(rate) && rate >= 0 ? rate : undefined;
+      };
+
+      if (cfg.paperType !== 'Normal' && paperDynamicType) {
+        return getDynamicRate(paperDynamicType) ?? null;
+      }
+
+      const pageSize = selectedPageSize === 'Bond' || selectedPageSize === 'Glossy' ? 'A4' : selectedPageSize;
+      const sizeRates = pricing.paperSizeRates?.[pageSize];
+      const configuredRate = sizeRates && (isCostone
+        ? doubleSide ? sizeRates.costoneDouble : sizeRates.costoneSingle
+        : isBW
+          ? doubleSide ? sizeRates.bwDouble : sizeRates.bwSingle
+          : doubleSide ? sizeRates.colorDouble : sizeRates.colorSingle);
+      const baseRate = configuredRate ?? getDynamicRate(sizeDynamicType);
+      if (baseRate === undefined || !Number.isFinite(baseRate) || baseRate < 0) return null;
+
+      const needsBondRate = selectedPageSize === 'Bond' || cfg.paperType === 'Bond Paper';
+      const needsGlossyRate = selectedPageSize === 'Glossy' || cfg.paperType === 'Glossy';
+      if (needsBondRate) {
+        return pricing.bondPaperRate === undefined ? null : baseRate + pricing.bondPaperRate;
+      }
+      if (needsGlossyRate) {
+        return pricing.glossyPaperRate === undefined ? null : baseRate + pricing.glossyPaperRate;
+      }
+      if (cfg.paperType !== 'Normal') return null;
+      return baseRate;
+    };
+
+    const printType = cfg.printType || 'Color';
+    const sides = cfg.sides || 'Single Side';
+    const baseRate = resolvePageRate(printType, sides);
+    if (baseRate === null) {
+      return invalidPrice(`The selected shop has no valid ${cfg.pageSize} ${cfg.paperType} ${printType} ${sides} rate configured.`);
     }
-
-    // Page size multiplier
-    if (cfg.pageSize === 'A3') {
-      baseRate *= selectedEnterprise.pricing.a3Multiplier;
-    } else if (cfg.pageSize === 'A2') {
-      baseRate *= selectedEnterprise.pricing.a2Multiplier;
-    }
-
-    const isBackToBackGlobal = cfg.sides === 'Back to Back' || cfg.sides === 'Back-to-Back';
 
     let subtotal = 0;
     let sheetsUsed = 0;
@@ -1563,15 +1692,7 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
         let singleSidePagesCount = 0;
         let backToBackPagesCount = 0;
         let coveredPagesCount = 0;
-
-        // Paper type add-on & size multiplier
-        let paperAddon = 0;
-        if (cfg.paperType === 'Bond Paper') paperAddon = selectedEnterprise.pricing.bondPaperExtra;
-        else if (cfg.paperType === 'Glossy') paperAddon = selectedEnterprise.pricing.glossyPaperExtra;
-
-        let sizeMultiplier = 1;
-        if (cfg.pageSize === 'A3') sizeMultiplier = selectedEnterprise.pricing.a3Multiplier;
-        else if (cfg.pageSize === 'A2') sizeMultiplier = selectedEnterprise.pricing.a2Multiplier;
+        const rangedPageCounts = new Map<string, { printType: string; sides: string; count: number }>();
 
         for (let p = 1; p <= totalDocPages; p++) {
           // Find if page p falls into a custom range rule
@@ -1583,11 +1704,17 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
           const pagePrintType = matchingRule.printType;
           const pageSides = matchingRule.sides;
 
-          const rateForPage = (pagePrintType === 'Color'
-            ? selectedEnterprise.pricing.colour
-            : selectedEnterprise.pricing.blackAndWhite) + paperAddon;
-
-          totalCostPerSet += rateForPage * sizeMultiplier;
+          const pageRate = resolvePageRate(pagePrintType, pageSides);
+          if (pageRate === null) {
+            return invalidPrice(`The selected shop has no valid ${cfg.pageSize} ${cfg.paperType} ${pagePrintType} ${pageSides} rate configured.`);
+          }
+          const key = `${pagePrintType}:${pageSides}`;
+          const group = rangedPageCounts.get(key);
+          rangedPageCounts.set(key, {
+            printType: pagePrintType,
+            sides: pageSides,
+            count: (group?.count || 0) + 1
+          });
 
           if (pageSides === 'Back to Back') {
             backToBackPagesCount++;
@@ -1595,6 +1722,13 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
             singleSidePagesCount++;
           }
         }
+
+        rangedPageCounts.forEach(group => {
+          const rate = resolvePageRate(group.printType, group.sides);
+          if (rate !== null) {
+            totalCostPerSet += group.count * rate;
+          }
+        });
 
         effectivePages = coveredPagesCount;
         subtotal = Number((totalCostPerSet * cfg.copies).toFixed(2));
@@ -1606,10 +1740,11 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
         subtotal = 0;
       }
     } else {
+      const isBackToBackGlobal = isBackToBack(sides);
       sheetsUsed = isBackToBackGlobal
         ? Math.ceil(compressedPages / 2) * cfg.copies
         : compressedPages * cfg.copies;
-      subtotal = Number((compressedPages * baseRate * cfg.copies).toFixed(2));
+      subtotal = Number((effectivePages * baseRate * cfg.copies).toFixed(2));
     }
 
     return {
@@ -1619,7 +1754,8 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
       subtotal,
       discount: 0,
       tax: 0,
-      grandTotal: subtotal
+      grandTotal: subtotal,
+      isValid: true
     };
   };
 
@@ -1630,10 +1766,17 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   const currentDocPriceCalc: PriceCalculation = currentDoc
     ? getDocPrice(currentDoc)
-    : calculateSingleDocPrice(
-        { id: 'fallback', fileName: 'Document', totalPages: 1, fileType: 'PDF' } as any,
-        printConfig
-      );
+    : {
+        effectivePages: 0,
+        sheetsUsed: 0,
+        baseRatePerSide: 0,
+        subtotal: 0,
+        discount: 0,
+        tax: 0,
+        grandTotal: 0,
+        isValid: false,
+        error: 'Upload a document to estimate pricing.'
+      };
 
   const calculatePrice = (): PriceCalculation => {
     const docs = uploadedDocs.length > 0 ? uploadedDocs : (currentDoc ? [currentDoc] : []);
@@ -1647,10 +1790,16 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
     docs.forEach(d => {
       const docCalc = getDocPrice(d);
+      if (!docCalc.isValid) return;
       totalSubtotal += docCalc.subtotal;
       totalSheetsUsed += docCalc.sheetsUsed;
       totalEffectivePages += docCalc.effectivePages;
     });
+
+    const invalidDoc = docs.map(getDocPrice).find(calc => !calc.isValid);
+    if (invalidDoc) {
+      return { ...invalidDoc, effectivePages: totalEffectivePages, sheetsUsed: totalSheetsUsed };
+    }
 
     // Membership discount on aggregate subtotal
     let discount = 0;
@@ -1660,7 +1809,7 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
     // GST is strictly REMOVED as requested by user
     const tax = 0;
-    const grandTotal = Math.max(2, Number((totalSubtotal - discount).toFixed(2)));
+    const grandTotal = Number((totalSubtotal - discount).toFixed(2));
 
     return {
       effectivePages: totalEffectivePages,
@@ -1669,7 +1818,8 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
       subtotal: Number(totalSubtotal.toFixed(2)),
       discount,
       tax: 0,
-      grandTotal
+      grandTotal,
+      isValid: true
     };
   };
 
@@ -1714,6 +1864,10 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   const createOrder = (paymentMethod: PaymentMethod, paymentDetail?: string, customerName?: string): PrintOrder => {
     const calc = calculatePrice();
+    if (!calc.isValid) {
+      toast.error(calc.error || 'This shop has no valid price configured for the selected print options.');
+      throw new Error(calc.error || 'Shop pricing is unavailable.');
+    }
     const tokenNum = `TK-${Math.floor(100 + Math.random() * 900)}`;
     const randomBarcode = `${Math.floor(1000000000 + Math.random() * 9000000000)}-${selectedEnterprise.shortCode}`;
     const invoiceId = `INV-${new Date().getFullYear()}-${Math.floor(10000 + Math.random() * 90000)}`;
@@ -1816,6 +1970,11 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
           totalPages: d.totalPages,
           config: isCustom ? { ...docCfg, printType: '' as any, sides: '' as any } : docCfg,
           print_segments: printSegments,
+          priceCalc: getDocPrice(d),
+          shopPricingSnapshot: {
+            shopId: selectedEnterprise.id,
+            pricing: selectedEnterprise.pricing
+          },
           subtotal: getDocPrice(d).subtotal
         };
       });
@@ -2613,7 +2772,12 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
         if (remoteMatch) {
           matched = remoteMatch;
           setEnterprises(prev => {
-            if (prev.some(e => e.id === remoteMatch.id)) return prev;
+            const existingIndex = prev.findIndex(e => e.id === remoteMatch.id);
+            if (existingIndex >= 0) {
+              return prev.map((enterprise, index) =>
+                index === existingIndex ? { ...enterprise, ...remoteMatch } : enterprise
+              );
+            }
             return [...prev, remoteMatch];
           });
         }
