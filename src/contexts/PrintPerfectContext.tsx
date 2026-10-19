@@ -2587,29 +2587,11 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   const loginWithGoogle = async (): Promise<{ success: boolean; error?: string }> => {
     try {
-      const { data } = await supabase.auth.signInWithSSO({
-        domain: 'miaoda-gg.com',
-        options: { redirectTo: window.location.origin }
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: `${window.location.origin}/` }
       });
-      if (data?.url) {
-        window.open(data.url, '_self');
-      }
-      const updatedUser: UserProfile = {
-        ...user,
-        id: `usr_google_${Date.now()}`,
-        name: user.name === 'Guest User' ? 'Campus Student' : user.name,
-        email: user.email || 'student.google@campus.edu',
-        isAuthenticated: true,
-        isGuest: false
-      };
-      setUser(updatedUser);
-      localStorage.setItem('printperfect_user', JSON.stringify(updatedUser));
-
-      if (pendingAuthAction) {
-        const actionToRun = pendingAuthAction;
-        setPendingAuthAction(null);
-        setTimeout(() => actionToRun(), 150);
-      }
+      if (error) throw error;
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err.message };
