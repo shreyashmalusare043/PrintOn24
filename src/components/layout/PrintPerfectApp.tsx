@@ -116,26 +116,31 @@ const PrintPerfectAppContent: React.FC = () => {
       setCurrentView('checkout');
     }
 
-    const shopkeeperMatch = window.location.pathname.match(/^\/shopkeeper\/([^/]+)\/?$/i);
-    if (shopkeeperMatch && enterprises.length > 0) {
+    const shopLinkMatch = window.location.pathname.match(/^\/(?:shopkeeper|shop|terminal|counter)\/([^/]+)\/?$/i);
+    if (shopLinkMatch && enterprises.length > 0) {
       let shopCode: string;
       try {
-        shopCode = decodeURIComponent(shopkeeperMatch[1]);
+        shopCode = decodeURIComponent(shopLinkMatch[1]);
       } catch {
-        toast.error('This shopkeeper link contains an invalid code.');
+        toast.error('This shop link contains an invalid code.');
         return;
       }
+      const normalizedShopCode = shopCode.toLowerCase();
       const found = enterprises.find(
-        e => e.id === shopCode || e.terminalCode.toLowerCase() === shopCode.toLowerCase()
+        e =>
+          e.id.toLowerCase() === normalizedShopCode ||
+          e.terminalCode.toLowerCase() === normalizedShopCode ||
+          e.shortCode.toLowerCase() === normalizedShopCode
       );
 
       if (found) {
         selectEnterprise(found.id);
         setActiveTab('upload');
         setCurrentView('upload');
-        toast.success(`Connected to ${found.name} via shopkeeper link!`);
+        toast.success(`Connected to ${found.name} via shop link!`);
+        window.history.replaceState({}, '', '/');
       } else {
-        toast.error(`Shopkeeper code "${shopCode}" was not found.`);
+        toast.error(`Shop code "${shopCode}" was not found.`);
       }
       return;
     }
@@ -143,13 +148,21 @@ const PrintPerfectAppContent: React.FC = () => {
     // Auto-connect shop via counter QR scan parameters (?shop=..., ?shopId=..., ?terminal=..., ?qr=...)
     const shopParam = params.get('shop') || params.get('shopId') || params.get('terminal') || params.get('qr');
     if (shopParam && enterprises.length > 0) {
+      const normalizedShopCode = shopParam.toLowerCase();
       const found = enterprises.find(
-        e => e.id === shopParam || e.terminalCode.toLowerCase() === shopParam.toLowerCase()
+        e =>
+          e.id.toLowerCase() === normalizedShopCode ||
+          e.terminalCode.toLowerCase() === normalizedShopCode ||
+          e.shortCode.toLowerCase() === normalizedShopCode
       );
       if (found) {
         selectEnterprise(found.id);
+        setActiveTab('upload');
+        setCurrentView('upload');
         toast.success(`Connected to ${found.name} via QR scan!`);
         window.history.replaceState({}, '', window.location.pathname);
+      } else {
+        toast.error(`Shop "${shopParam}" was not found.`);
       }
     }
   }, [orders, enterprises]);

@@ -182,7 +182,7 @@ export const ScanView: React.FC<ScanViewProps> = ({ onProceedToUpload }) => {
         toast.success(`QR Scanned: Connected to ${shop.name} (${shop.terminalCode})!`);
         setTimeout(() => {
           window.location.assign(
-            `${window.location.origin}/shopkeeper/${encodeURIComponent(shop.terminalCode)}`
+            `https://www.printon24.in/shopkeeper/${encodeURIComponent(shop.terminalCode)}`
           );
         }, 500);
       } else {

@@ -164,13 +164,15 @@ Pages: ${order.calculatedPages} | Copies: ${order.config.copies}
 Print Type: ${order.config.printType} • ${order.config.sides}
 Amount: ₹${order.grandTotal.toFixed(2)}
 Payment: ${order.paymentMethod} (${order.paymentStatus})
-Date: ${order.createdAt}`;
+Date: ${order.createdAt}
+Shop link: https://www.printon24.in/shopkeeper/${encodeURIComponent(order.enterpriseId)}`;
     navigator.clipboard.writeText(receiptText);
     toast.success('Receipt information copied to clipboard!');
   };
 
   const handleShareReceipt = async () => {
     const clientName = (order.customerName || user.name || 'Customer').trim();
+    const shopLink = `https://www.printon24.in/shopkeeper/${encodeURIComponent(order.enterpriseId)}`;
     const shareText = `*printOn24 Receipt - Token #${order.tokenNumber}*\nShop: ${order.enterpriseName}\nClient: ${clientName}\nDocument: ${order.document?.fileName || 'Print Document'}\nPages: ${order.calculatedPages} | Copies: ${order.config.copies}\nTotal: ₹${order.grandTotal.toFixed(2)}\nInvoice: ${order.invoiceId}\nPresent this digital token at the shop counter.`;
 
     if (navigator.share) {
@@ -178,18 +180,19 @@ Date: ${order.createdAt}`;
         await navigator.share({
           title: `printOn24 Receipt - Token #${order.tokenNumber}`,
           text: shareText,
-          url: window.location.href
+          url: shopLink
         });
         toast.success('Receipt shared successfully!');
       } catch (err: any) {
         if (err.name !== 'AbortError') {
-          handleCopyReceiptInfo();
+          await navigator.clipboard.writeText(`${shareText}\nShop link: ${shopLink}`);
+          toast.success('Receipt and shop link copied to clipboard!');
         }
       }
     } else {
       if (navigator.clipboard) {
-        await navigator.clipboard.writeText(shareText);
-        toast.success('Share details copied to clipboard! Paste in WhatsApp or chat.');
+        await navigator.clipboard.writeText(`${shareText}\nShop link: ${shopLink}`);
+        toast.success('Share details and shop link copied to clipboard! Paste in WhatsApp or chat.');
       } else {
         handleCopyReceiptInfo();
       }
