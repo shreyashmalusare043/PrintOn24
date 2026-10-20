@@ -1,5 +1,6 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+// @ts-ignore Deno resolves URL imports at runtime; the editor's TypeScript resolver does not.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+// @ts-ignore Deno resolves URL imports at runtime; the editor's TypeScript resolver does not.
 import JSZip from "https://esm.sh/jszip@3.10.1";
 
 const corsHeaders = {
@@ -29,7 +30,9 @@ async function extractWorkbookSheets(fileBuffer: Uint8Array): Promise<string[]> 
   try {
     const zip = await JSZip.loadAsync(fileBuffer);
     const workbookXml = (await zip.file("xl/workbook.xml")?.async("text")) || "";
-    const sheetMatches = Array.from(workbookXml.matchAll(/<sheet[^>]*name="([^"]+)"/gi));
+    const sheetMatches = Array.from(
+      workbookXml.matchAll(/<sheet[^>]*name="([^"]+)"/gi),
+    ) as RegExpMatchArray[];
     const sheets = sheetMatches.map((m) => m[1]).filter(Boolean);
     return sheets.length > 0 ? sheets : ["Sheet1"];
   } catch {
@@ -37,7 +40,13 @@ async function extractWorkbookSheets(fileBuffer: Uint8Array): Promise<string[]> 
   }
 }
 
-serve(async (req) => {
+// Deno is provided by the runtime, but may not be declared in the editor's TypeScript environment.
+declare const Deno: {
+  env: { get(name: string): string | undefined };
+  serve(handler: (req: Request) => Response | Promise<Response>): void;
+};
+
+Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
@@ -158,7 +167,9 @@ serve(async (req) => {
       
       try {
         const form = new FormData();
-        const blob = new Blob([fileBuffer], { type: "application/octet-stream" });
+        const blobBuffer = new ArrayBuffer(fileBuffer.byteLength);
+        new Uint8Array(blobBuffer).set(fileBuffer);
+        const blob = new Blob([blobBuffer], { type: "application/octet-stream" });
         form.append("files", blob, fileName);
 
         // Support LibreOffice conversion parameters

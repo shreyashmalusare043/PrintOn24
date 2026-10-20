@@ -2,7 +2,15 @@
 // https://deno.land/manual/getting_started/setup_your_environment
 // This enables autocomplete, go to definition, etc.
 
-import { createClient } from 'npm:@supabase/supabase-js@2';
+// @ts-ignore Deno resolves this remote module URL at runtime.
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+const deno = (globalThis as typeof globalThis & {
+  Deno: {
+    env: { get(name: string): string | undefined };
+    serve(handler: (req: Request) => Response | Promise<Response>): void;
+  };
+}).Deno;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -10,10 +18,10 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, GET, OPTIONS'
 };
 
-const RAZORPAY_KEY_ID = Deno.env.get('RAZORPAY_KEY_ID') || 'rzp_test_TieNJV8WPspbdd';
-const RAZORPAY_KEY_SECRET = Deno.env.get('RAZORPAY_KEY_SECRET') || '19f3r1gh1QKPKyhqOxAmq1Ah';
-const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || '';
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || Deno.env.get('SUPABASE_ANON_KEY') || '';
+const RAZORPAY_KEY_ID = deno.env.get('RAZORPAY_KEY_ID') || 'rzp_test_TieNJV8WPspbdd';
+const RAZORPAY_KEY_SECRET = deno.env.get('RAZORPAY_KEY_SECRET') || '19f3r1gh1QKPKyhqOxAmq1Ah';
+const SUPABASE_URL = deno.env.get('SUPABASE_URL') || '';
+const SUPABASE_SERVICE_ROLE_KEY = deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || deno.env.get('SUPABASE_ANON_KEY') || '';
 
 async function computeHmacSha256(secret: string, message: string): Promise<string> {
   const enc = new TextEncoder();
@@ -30,7 +38,7 @@ async function computeHmacSha256(secret: string, message: string): Promise<strin
     .join('');
 }
 
-Deno.serve(async (req) => {
+deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }

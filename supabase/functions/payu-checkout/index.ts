@@ -1,4 +1,10 @@
+// @ts-ignore Deno resolves npm: specifiers at runtime; non-Deno TypeScript tooling may not.
 import { createClient } from "npm:@supabase/supabase-js@2";
+
+declare const Deno: {
+  env: { get(name: string): string | undefined };
+  serve(handler: (req: Request) => Response | Promise<Response>): void;
+};
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
