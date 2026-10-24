@@ -51,6 +51,7 @@ import {
   fetchGuestProfileImage,
   submitShopReview
 } from '../services/api';
+import { getPdfPageCount } from '../utils/pdfPageCount';
 
 interface PriceCalculation {
   effectivePages: number;
@@ -284,6 +285,15 @@ export const isDocConfigValid = (
   if (!doc) return { isValid: false, error: 'No document selected' };
   if (doc.uploadStatus && doc.uploadStatus !== 'READY') {
     return { isValid: false, error: 'Document upload or processing in progress.' };
+  }
+  if (doc.conversionStatus === 'failed') {
+    return { isValid: false, error: 'Document conversion failed. Upload the file again before placing the order.' };
+  }
+  if (
+    (doc.fileType === 'XLS' || doc.fileType === 'XLSX') &&
+    doc.conversionStatus !== 'converted'
+  ) {
+    return { isValid: false, error: 'Select an Excel sheet and press Set before continuing.' };
   }
 
   const cfg = doc.printConfig;
@@ -976,6 +986,7 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
     }
     const imgUrl = customData?.imageUrl || localBlobUrl || publicStorageUrl;
 
+    let pdfPageCountFailed = false;
     let calculatedPages = customData?.totalPages !== undefined
       ? customData.totalPages
       : (validExt === 'JPG' || validExt === 'PNG' || file.type.startsWith('image/'))
@@ -998,20 +1009,8 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
     if (validExt === 'PDF' || file.type === 'application/pdf') {
       try {
         const buffer = await file.arrayBuffer();
+        calculatedPages = await getPdfPageCount(new Uint8Array(buffer));
         const text = new TextDecoder('latin1').decode(buffer);
-        // Match /Type /Pages /Count N
-        const countMatches = text.match(/\/Type\s*\/Pages[^>]*\/Count\s+(\d+)/);
-        if (countMatches && countMatches[1]) {
-          const parsed = parseInt(countMatches[1], 10);
-          if (!isNaN(parsed) && parsed > 0) {
-            calculatedPages = parsed;
-          }
-        } else {
-          const pageMatches = text.match(/\/Type\s*\/Page\b/g);
-          if (pageMatches && pageMatches.length > 0) {
-            calculatedPages = pageMatches.length;
-          }
-        }
 
         // Detect PDF orientation from MediaBox or CropBox
         const boxMatches = text.match(/\/(?:MediaBox|CropBox)\s*\[\s*([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s*\]/);
@@ -1023,7 +1022,9 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
           }
         }
       } catch (pdfErr) {
-        console.warn('PDF real page count detection note:', pdfErr);
+        console.error('Failed to read PDF page count:', pdfErr);
+        pdfPageCountFailed = true;
+        toast.error(`Could not read the pages in "${file.name}". Please upload the PDF again.`);
       }
     }
 
@@ -1045,22 +1046,9 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
       }
     }
 
-    // Detect page count & orientation for Word files
+    // Detect orientation for Word files. Their page count comes from the converted PDF.
     if (validExt === 'DOC' || validExt === 'DOCX' || file.name.match(/\.docx?$/i) || file.type.includes('word')) {
       detectedLayout = 'Portrait';
-      try {
-        const buffer = await file.arrayBuffer();
-        const text = new TextDecoder('latin1').decode(buffer);
-        const pageMatch = text.match(/<Pages>(\d+)<\/Pages>/);
-        if (pageMatch && pageMatch[1]) {
-          const parsed = parseInt(pageMatch[1], 10);
-          if (!isNaN(parsed) && parsed > 0) {
-            calculatedPages = parsed;
-          }
-        }
-      } catch (docErr) {
-        console.warn('Word page count detection note:', docErr);
-      }
     }
 
     // Detect image dimensions & orientation (Requirement 3: Automatic Orientation for Landscape uploads)
@@ -1087,20 +1075,48 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
     let finalPreviewUrl = publicStorageUrl;
     let convertedPdfUrl = '';
     let isConverted = false;
-    let conversionStatus: 'idle' | 'converting' | 'converted' | 'failed' = 'idle';
+    let conversionStatus: 'idle' | 'converting' | 'converted' | 'failed' = pdfPageCountFailed ? 'failed' : 'idle';
     let excelSheets: string[] | undefined = undefined;
     let selectedSheet = '';
     let excelScaling: 'No Scaling' | 'Fit Sheet on One Page' | 'Fit All Columns on One Page' | 'Fit All Rows on One Page' = 'No Scaling';
 
-    // Check if file is Office Document requiring Gotenberg/LibreOffice PDF conversion
+    const isExcelDoc = ['XLS', 'XLSX'].includes(validExt) || file.name.match(/\.(xlsx?|csv)$/i);
     const isOfficeDoc = ['DOC', 'DOCX', 'XLS', 'XLSX', 'PPT', 'PPTX'].includes(validExt) ||
       file.name.match(/\.(docx?|xlsx?|csv|pptx?)$/i);
 
-    if (isOfficeDoc) {
+    if (isExcelDoc) {
+      calculatedPages = 0;
+      try {
+        const inspection = await convertDocumentViaBackend({
+          file,
+          fileUrl: publicStorageUrl,
+          fileName: file.name,
+          fileType: validExt,
+          inspectOnly: true,
+          userId: user.id,
+          shopId: selectedEnterprise.id,
+          docId
+        });
+        if (!inspection?.success || !inspection.sheets?.length) {
+          throw new Error(inspection?.error || 'No worksheets were found in this workbook.');
+        }
+        excelSheets = inspection.sheets;
+        selectedSheet = inspection.sheets[0];
+        conversionStatus = 'idle';
+      } catch (inspectErr) {
+        calculatedPages = 0;
+        conversionStatus = 'failed';
+        console.error('Excel workbook inspection failed:', inspectErr);
+        toast.error(inspectErr instanceof Error
+          ? `Could not read Excel sheets: ${inspectErr.message}`
+          : 'Could not read Excel sheets. Please upload the workbook again.');
+      }
+    } else if (isOfficeDoc) {
+      calculatedPages = 0;
       try {
         conversionStatus = 'converting';
-        // Non-PDF conversion runs silently in background per userPanel.docx (no toasts)
         const convResult = await convertDocumentViaBackend({
+          file,
           fileUrl: publicStorageUrl,
           fileName: file.name,
           fileType: validExt,
@@ -1111,9 +1127,18 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
         });
 
         if (convResult?.success && convResult.pdfUrl) {
+          const convertedPageCount = convResult.totalPages;
+          if (typeof convertedPageCount !== 'number' || !Number.isSafeInteger(convertedPageCount) || convertedPageCount < 1) {
+            throw new Error('The document converter did not return a valid page count.');
+          }
+          calculatedPages = convertedPageCount;
+          try {
+            calculatedPages = await getPdfPageCount(convResult.pdfUrl);
+          } catch (previewCountError) {
+            console.warn('Could not read converted PDF page count in browser; using the converter count:', previewCountError);
+          }
           convertedPdfUrl = convResult.pdfUrl;
           finalPreviewUrl = convResult.pdfUrl;
-          calculatedPages = convResult.totalPages || calculatedPages;
           isConverted = true;
           conversionStatus = 'converted';
           if (convResult.sheets && convResult.sheets.length > 0) {
@@ -1121,11 +1146,17 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
             selectedSheet = convResult.sheets[0];
           }
         } else {
+          calculatedPages = 0;
           conversionStatus = 'failed';
+          toast.error(convResult?.error || `Could not convert "${file.name}". Please upload it again.`);
         }
       } catch (convErr) {
-        console.warn('Document conversion notice:', convErr);
+        console.error('Document conversion failed:', convErr);
+        calculatedPages = 0;
         conversionStatus = 'failed';
+        toast.error(convErr instanceof Error
+          ? `Could not convert "${file.name}": ${convErr.message}`
+          : `Could not convert "${file.name}". Please upload it again.`);
       }
     }
 
@@ -1372,6 +1403,12 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
     const doc = uploadedDocs.find(d => d.id === docId);
     if (!doc) return;
 
+    setUploadedDocs(prev => prev.map(d =>
+      d.id === docId ? { ...d, conversionStatus: 'converting' } : d
+    ));
+    if (currentDoc?.id === docId) {
+      setCurrentDoc(prev => prev ? { ...prev, conversionStatus: 'converting' } : null);
+    }
     toast.loading('Converting with selected sheet & scaling...', { id: `conv-${docId}` });
     try {
       const convResult = await convertDocumentViaBackend({
@@ -1387,7 +1424,9 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
       });
 
       if (convResult?.success && convResult.pdfUrl) {
-        const newTotalPages = convResult.totalPages || doc.totalPages;
+        const newTotalPages = typeof convResult.totalPages === 'number' && convResult.totalPages > 0
+          ? convResult.totalPages
+          : await getPdfPageCount(convResult.pdfUrl);
         setUploadedDocs(prev => prev.map(d => {
           if (d.id === docId) {
             return {
@@ -1424,7 +1463,11 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
             converted_pdf_url: convResult.pdfUrl,
             total_pages: newTotalPages,
             excel_scaling: options.scaling || doc.excelScaling,
-            print_config: { ...doc.printConfig, excelScaling: options.scaling }
+            print_config: {
+              ...doc.printConfig,
+              excelScaling: options.scaling,
+              selectedSheet: options.selectedSheet || doc.selectedSheet
+            }
           }).eq('id', docId).then();
         } catch (dbErr) {
           console.warn('Failed to persist reconverted document settings:', dbErr);
@@ -1432,9 +1475,21 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
         toast.success(`Converted to PDF (${newTotalPages} page${newTotalPages > 1 ? 's' : ''})!`, { id: `conv-${docId}` });
       } else {
-        toast.error('Conversion failed. Please try again.', { id: `conv-${docId}` });
+        setUploadedDocs(prev => prev.map(d =>
+          d.id === docId ? { ...d, conversionStatus: 'failed' } : d
+        ));
+        if (currentDoc?.id === docId) {
+          setCurrentDoc(prev => prev ? { ...prev, conversionStatus: 'failed' } : null);
+        }
+        toast.error(convResult?.error || 'Conversion failed. Please try again.', { id: `conv-${docId}` });
       }
     } catch (e: any) {
+      setUploadedDocs(prev => prev.map(d =>
+        d.id === docId ? { ...d, conversionStatus: 'failed' } : d
+      ));
+      if (currentDoc?.id === docId) {
+        setCurrentDoc(prev => prev ? { ...prev, conversionStatus: 'failed' } : null);
+      }
       toast.error(`Conversion failed: ${e.message}`, { id: `conv-${docId}` });
     }
   };
@@ -1501,11 +1556,17 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
         // Persist exact selected print config to database table
         try {
-          supabase.from('uploaded_documents').update({
+          void supabase.from('uploaded_documents').update({
             print_config: next
-          }).eq('id', currentDoc.id).then();
+          }).eq('id', currentDoc.id).then(({ error }) => {
+            if (error) {
+              console.error('Failed to persist print config to database:', error);
+            }
+          }, (dbErr: unknown) => {
+            console.error('Failed to persist print config to database:', dbErr);
+          });
         } catch (dbErr) {
-          console.warn('Failed to persist print config to database:', dbErr);
+          console.error('Failed to persist print config to database:', dbErr);
         }
       }
       return next;
@@ -1598,6 +1659,13 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
     const pricing = selectedEnterprise.pricing;
     if (!pricing.isConfigured || pricing.shopId !== selectedEnterprise.id) {
       return invalidPrice(`Pricing for ${selectedEnterprise.name} is not available yet.`);
+    }
+
+    if (
+      (doc.fileType === 'XLS' || doc.fileType === 'XLSX') &&
+      doc.conversionStatus !== 'converted'
+    ) {
+      return invalidPrice('Choose an Excel sheet and press Set before calculating print cost.');
     }
 
     let effectivePages = doc.totalPages || 1;
@@ -1968,7 +2036,11 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
           fileName: d.fileName,
           fileType: d.fileType,
           totalPages: d.totalPages,
-          config: isCustom ? { ...docCfg, printType: '' as any, sides: '' as any } : docCfg,
+          config: {
+            ...(isCustom ? { ...docCfg, printType: '' as any, sides: '' as any } : docCfg),
+            ...(d.excelScaling ? { excelScaling: d.excelScaling } : {}),
+            ...(d.selectedSheet ? { selectedSheet: d.selectedSheet } : {})
+          },
           print_segments: printSegments,
           priceCalc: getDocPrice(d),
           shopPricingSnapshot: {
@@ -2050,7 +2122,11 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
             excel_sheets: doc.excelSheets || null,
             excel_scaling: doc.excelScaling || null,
             image_editing: doc.imageEditing || {},
-            print_config: docCfg,
+            print_config: {
+              ...docCfg,
+              ...(doc.excelScaling ? { excelScaling: doc.excelScaling } : {}),
+              ...(doc.selectedSheet ? { selectedSheet: doc.selectedSheet } : {})
+            },
             created_at: doc.createdAt || new Date().toISOString(),
             expiry_at: doc.expiryAt || new Date(Date.now() + 12 * 3600 * 1000).toISOString(),
             deleted_at: null

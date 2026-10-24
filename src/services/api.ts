@@ -210,6 +210,46 @@ type ShopPricingRow = {
   [column: string]: unknown;
 };
 
+type ShopDynamicPaperTypeRow = {
+  name: string;
+  bw_price: number | string;
+  color_price: number | string;
+  is_active: boolean;
+};
+
+async function getShopDynamicPaperTypeRows(shopId: string): Promise<ShopDynamicPaperTypeRow[]> {
+  const { data, error } = await supabase
+    .from('shop_dynamic_paper_types')
+    .select('name, bw_price, color_price, is_active')
+    .eq('shop_id', shopId)
+    .eq('is_active', true)
+    .order('name');
+
+  if (error) throw error;
+  return (data || []) as ShopDynamicPaperTypeRow[];
+}
+
+function mapShopPricingWithDynamicTypes(
+  row: ShopPricingRow | null | undefined,
+  shopId: string,
+  dynamicTypeRows: ShopDynamicPaperTypeRow[]
+): PrintEnterprise['pricing'] {
+  const legacyTypes = Array.isArray(row?.dynamic_paper_types) ? row.dynamic_paper_types : [];
+  const mergedTypes = new Map<string, unknown>();
+  [...legacyTypes, ...dynamicTypeRows].forEach(item => {
+    if (!item || typeof item !== 'object') return;
+    const name = (item as Record<string, unknown>).name;
+    if (typeof name === 'string' && name.trim()) {
+      mergedTypes.set(name.trim().toLocaleLowerCase(), item);
+    }
+  });
+  return mapShopPricing({
+    ...(row || {}),
+    shop_id: shopId,
+    dynamic_paper_types: Array.from(mergedTypes.values())
+  }, shopId);
+}
+
 const DEFAULT_SHOP_PRINT_PRICING: PrintEnterprise['pricing'] = {
   blackAndWhite: 0,
   colour: 0,
@@ -386,8 +426,21 @@ export async function getPrintShops(): Promise<RemoteShopData[]> {
       throw pricingError;
     }
 
+    const { data: dynamicTypeRows, error: dynamicTypeError } = await supabase
+      .from('shop_dynamic_paper_types')
+      .select('shop_id, name, bw_price, color_price, is_active')
+      .in('shop_id', shopIds)
+      .eq('is_active', true);
+    if (dynamicTypeError) throw dynamicTypeError;
+
     const pricingByShopId = new Map<string, ShopPricingRow>();
     pricingRows?.forEach((row: any) => pricingByShopId.set(row.shop_id, row as ShopPricingRow));
+    const dynamicTypesByShopId = new Map<string, ShopDynamicPaperTypeRow[]>();
+    dynamicTypeRows?.forEach((row: any) => {
+      const current = dynamicTypesByShopId.get(row.shop_id) || [];
+      current.push(row as ShopDynamicPaperTypeRow);
+      dynamicTypesByShopId.set(row.shop_id, current);
+    });
 
     return data
       .filter((shop: any) => shop.status !== 'inactive' && shop.status !== 'disabled' && shop.is_open !== false)
@@ -406,7 +459,11 @@ export async function getPrintShops(): Promise<RemoteShopData[]> {
         logoUrl: shop.logo_url || '',
         membershipEnabled: shop.membership_enabled ?? false,
         membershipPrice: shop.membership_price ? Number(shop.membership_price) : 99,
-        pricing: mapShopPricing(pricingByShopId.get(shop.id), shop.id)
+        pricing: mapShopPricingWithDynamicTypes(
+          pricingByShopId.get(shop.id),
+          shop.id,
+          dynamicTypesByShopId.get(shop.id) || []
+        )
       }));
   } catch (err) {
     console.error('getPrintShops exception:', err);
@@ -475,14 +532,14 @@ export async function fetchShopByTerminalCode(code: string): Promise<PrintEnterp
       if (fallbackData.status === 'inactive' || fallbackData.status === 'disabled' || fallbackData.is_open === false) {
         return null;
       }
-      return mapDbShopToEnterprise(fallbackData, await getShopPricingRecord(fallbackData.id));
+      return mapDbShopToEnterprise(fallbackData, await getShopPricingRecordWithDynamicTypes(fallbackData.id));
     }
 
     if (data.status === 'inactive' || data.status === 'disabled' || data.is_open === false) {
       return null;
     }
 
-    return mapDbShopToEnterprise(data, await getShopPricingRecord(data.id));
+    return mapDbShopToEnterprise(data, await getShopPricingRecordWithDynamicTypes(data.id));
   } catch (err) {
     console.error('fetchShopByTerminalCode error:', err);
     return null;
@@ -502,9 +559,27 @@ async function getShopPricingRecord(shopId: string): Promise<ShopPricingRow | nu
   return data as ShopPricingRow | null;
 }
 
+async function getShopPricingRecordWithDynamicTypes(shopId: string): Promise<ShopPricingRow> {
+  const [pricingRow, dynamicTypeRows] = await Promise.all([
+    getShopPricingRecord(shopId),
+    getShopDynamicPaperTypeRows(shopId)
+  ]);
+  return {
+    ...(pricingRow || {}),
+    shop_id: shopId,
+    dynamic_paper_types: [
+      ...(Array.isArray(pricingRow?.dynamic_paper_types) ? pricingRow.dynamic_paper_types : []),
+      ...dynamicTypeRows
+    ]
+  };
+}
+
 export async function getShopPrintPricing(shopId: string): Promise<PrintEnterprise['pricing']> {
-  const row = await getShopPricingRecord(shopId);
-  return mapShopPricing(row, shopId);
+  const [row, dynamicTypeRows] = await Promise.all([
+    getShopPricingRecord(shopId),
+    getShopDynamicPaperTypeRows(shopId)
+  ]);
+  return mapShopPricingWithDynamicTypes(row, shopId, dynamicTypeRows);
 }
 
 import { getShopInitials } from '../utils/shopInitials';
@@ -733,10 +808,7 @@ export async function getShopPrinters(shopId: string): Promise<ShopPrinterInfo[]
 }
 
 /**
- * Requirement 5 & 6: Fetch available page selection dropdown options dynamically
- * from the database using the currently selected shopkeeper's ID.
- * Show only the paper sizes and special paper types that the selected shopkeeper
- * has configured and enabled in their Page Pricing/Printer Configuration settings.
+ * Fetch the selected shop's configured paper sizes and active paper types separately.
  */
 export interface ShopPaperPricingInfo {
   sizes: string[];
@@ -762,15 +834,14 @@ export async function getShopPaperPricingDetails(shopId: string): Promise<ShopPa
   }
 
   try {
-    const { data: pricing, error: pricingError } = await supabase
-      .from('shop_pricing')
-      .select('*')
-      .eq('shop_id', shopId)
-      .maybeSingle();
+    const [{ data: pricing, error: pricingError }, dynamicTypeRows] = await Promise.all([
+      supabase.from('shop_pricing').select('*').eq('shop_id', shopId).maybeSingle(),
+      getShopDynamicPaperTypeRows(shopId)
+    ]);
     if (pricingError) throw pricingError;
 
+    const mapped = mapShopPricingWithDynamicTypes(pricing as ShopPricingRow | null, shopId, dynamicTypeRows);
     if (pricing) {
-      const mapped = mapShopPricing(pricing as ShopPricingRow, shopId);
       const baseRates = mapped.paperSizeRates?.A4;
       if (baseRates?.bwSingle !== undefined || baseRates?.colorSingle !== undefined) {
         sizesSet.add('A4');
@@ -784,21 +855,14 @@ export async function getShopPaperPricingDetails(shopId: string): Promise<ShopPa
         }
       });
 
-      mapped.dynamicPaperTypes?.forEach(paper => {
-        if (paper.bwPrice !== undefined || paper.colorPrice !== undefined) {
-          sizesSet.add(paper.name);
-          paperPrices[paper.name] = { bwPrice: paper.bwPrice, colorPrice: paper.colorPrice };
-        }
-      });
-
-      if (mapped.bondPaperRate !== undefined && baseRates?.bwSingle !== undefined && baseRates.colorSingle !== undefined) {
+      if (mapped.bondPaperRate !== undefined && mapped.bondPaperRate > 0 && baseRates?.bwSingle !== undefined && baseRates.colorSingle !== undefined) {
         sizesSet.add('Bond');
         paperPrices.Bond = {
           bwPrice: baseRates.bwSingle + mapped.bondPaperRate,
           colorPrice: baseRates.colorSingle + mapped.bondPaperRate
         };
       }
-      if (mapped.glossyPaperRate !== undefined && baseRates?.bwSingle !== undefined && baseRates.colorSingle !== undefined) {
+      if (mapped.glossyPaperRate !== undefined && mapped.glossyPaperRate > 0 && baseRates?.bwSingle !== undefined && baseRates.colorSingle !== undefined) {
         sizesSet.add('Glossy');
         paperPrices.Glossy = {
           bwPrice: baseRates.bwSingle + mapped.glossyPaperRate,
@@ -862,6 +926,7 @@ export interface DocumentConversionResult {
   sheets?: string[];
   selectedSheet?: string;
   scaling?: string;
+  inspectOnly?: boolean;
   error?: string;
 }
 
@@ -870,6 +935,7 @@ export async function convertDocumentViaBackend(payload: {
   fileUrl?: string;
   fileName: string;
   fileType: string;
+  inspectOnly?: boolean;
   selectedSheet?: string;
   scaling?: string;
   sheets?: string[];
@@ -878,18 +944,38 @@ export async function convertDocumentViaBackend(payload: {
   docId?: string;
 }): Promise<DocumentConversionResult | null> {
   try {
-    const { data, error } = await supabase.functions.invoke('convert-document', {
-      body: {
+    let body: FormData | Record<string, unknown>;
+    if (payload.file) {
+      const formData = new FormData();
+      formData.append('file', payload.file, payload.fileName);
+      formData.append('fileName', payload.fileName);
+      formData.append('fileType', payload.fileType);
+      if (payload.fileUrl) formData.append('fileUrl', payload.fileUrl);
+      if (payload.selectedSheet) formData.append('selectedSheet', payload.selectedSheet);
+      if (payload.scaling) formData.append('scaling', payload.scaling);
+      if (payload.inspectOnly) formData.append('inspectOnly', 'true');
+      if (payload.sheets) formData.append('sheets', JSON.stringify(payload.sheets));
+      if (payload.userId) formData.append('userId', payload.userId);
+      if (payload.shopId) formData.append('shopId', payload.shopId);
+      if (payload.docId) formData.append('docId', payload.docId);
+      body = formData;
+    } else {
+      body = {
         fileUrl: payload.fileUrl,
         fileName: payload.fileName,
         fileType: payload.fileType,
         selectedSheet: payload.selectedSheet,
         scaling: payload.scaling,
+        inspectOnly: payload.inspectOnly,
         sheets: payload.sheets,
         userId: payload.userId,
         shopId: payload.shopId,
         docId: payload.docId
-      }
+      };
+    }
+
+    const { data, error } = await supabase.functions.invoke('convert-document', {
+      body
     });
 
     if (error || !data) {

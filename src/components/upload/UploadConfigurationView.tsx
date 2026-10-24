@@ -171,12 +171,18 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
       // Clear previous shop's options immediately so they are never retained across shop changes
       setAvailablePaperSizes([]);
       setIsLoadingPaperSizes(true);
+      let isCurrentShop = true;
 
       getShopPaperPricingDetails(selectedEnterprise.id)
         .then(details => {
+          if (!isCurrentShop) return;
           setIsLoadingPaperSizes(false);
           const sizes = details.sizes;
           setAvailablePaperSizes(sizes);
+
+          if (printConfig.paperType !== 'Normal') {
+            updatePrintConfig({ paperType: 'Normal' });
+          }
 
           // Apply defaults only when creating fresh configuration or when no saved valid selection exists
           // 1. If A4 is configured and available for the selected shop, select it by default.
@@ -202,11 +208,17 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
           }
         })
         .catch(err => {
+          if (!isCurrentShop) return;
           console.error('Failed to load shop paper sizes:', err);
           setIsLoadingPaperSizes(false);
         });
+
+      return () => {
+        isCurrentShop = false;
+      };
     } else {
       setAvailablePaperSizes([]);
+      setIsLoadingPaperSizes(false);
     }
   }, [selectedEnterprise?.id]);
 
@@ -896,7 +908,11 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                           </div>
                           <div className="flex items-center gap-1.5 mt-1 flex-wrap text-[10px]">
                             <span className="text-slate-500">
-                              {doc.totalPages} {doc.totalPages === 1 ? 'Page' : 'Pages'}
+                              {doc.conversionStatus === 'failed'
+                                ? 'Conversion failed'
+                                : (doc.fileType === 'XLS' || doc.fileType === 'XLSX') && doc.conversionStatus !== 'converted'
+                                  ? 'Choose sheet & Set'
+                                  : `${doc.totalPages} ${doc.totalPages === 1 ? 'Page' : 'Pages'}`}
                             </span>
                             <span className="text-slate-300">•</span>
                             <span className="font-semibold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded">
@@ -999,7 +1015,11 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                     Active Document
                   </span>
                   <span className="text-[10px] text-slate-500 font-semibold">
-                    {currentDoc.fileType} • {currentDoc.totalPages} {currentDoc.totalPages === 1 ? 'Page' : 'Pages'}
+                    {currentDoc.fileType} • {currentDoc.conversionStatus === 'failed'
+                      ? 'Conversion failed'
+                      : (currentDoc.fileType === 'XLS' || currentDoc.fileType === 'XLSX') && currentDoc.conversionStatus !== 'converted'
+                        ? 'Choose sheet & Set'
+                        : `${currentDoc.totalPages} ${currentDoc.totalPages === 1 ? 'Page' : 'Pages'}`}
                   </span>
                 </div>
                 <h4
@@ -1022,7 +1042,7 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
               Print Configuration
             </h3>
             <p className="text-[10px] text-slate-500">
-              Customize sides, color mode, copies, and page range
+            Customize paper type, sides, color mode, copies, and page range
             </p>
           </div>
         </div>
@@ -1104,20 +1124,7 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                       key={sheet}
                       type="button"
                       disabled={isReconverting}
-                      onClick={async () => {
-                        setActiveSheet(sheet);
-                        if (currentDoc) {
-                          setIsReconverting(true);
-                          try {
-                            await reconvertDocument(currentDoc.id, {
-                              selectedSheet: sheet,
-                              scaling: activeScaling
-                            });
-                          } finally {
-                            setIsReconverting(false);
-                          }
-                        }
-                      }}
+                      onClick={() => setActiveSheet(sheet)}
                       className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
                         activeSheet === sheet
                           ? 'bg-[#FF1300] text-white shadow-xs font-heading'
@@ -1148,20 +1155,7 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                       key={scaleOption}
                       type="button"
                       disabled={isReconverting}
-                      onClick={async () => {
-                        setActiveScaling(scaleOption);
-                        if (currentDoc) {
-                          setIsReconverting(true);
-                          try {
-                            await reconvertDocument(currentDoc.id, {
-                              selectedSheet: activeSheet,
-                              scaling: scaleOption
-                            });
-                          } finally {
-                            setIsReconverting(false);
-                          }
-                        }
-                      }}
+                      onClick={() => setActiveScaling(scaleOption)}
                       className={`px-3 py-2 rounded-xl text-xs font-bold text-left border transition-all flex items-center justify-between ${
                         activeScaling === scaleOption
                           ? 'bg-red-50 border-[#FF1300] text-[#FF1300] shadow-xs'
@@ -1176,6 +1170,26 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                   ))}
                 </div>
               </div>
+
+              <button
+                type="button"
+                disabled={isReconverting || !currentDoc || !activeSheet}
+                onClick={async () => {
+                  if (!currentDoc) return;
+                  setIsReconverting(true);
+                  try {
+                    await reconvertDocument(currentDoc.id, {
+                      selectedSheet: activeSheet,
+                      scaling: activeScaling
+                    });
+                  } finally {
+                    setIsReconverting(false);
+                  }
+                }}
+                className="w-full rounded-xl bg-[#FF1300] px-4 py-2.5 text-xs font-black text-white shadow-sm transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isReconverting ? 'Setting Excel options...' : 'Set & Convert to PDF'}
+              </button>
             </div>
           )}
 

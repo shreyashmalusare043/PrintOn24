@@ -15,7 +15,7 @@ export interface UserProfile {
   businessOnboarded: boolean;
   defaultPrintPrefs: {
     pageSize: 'A4' | 'A3' | 'A2' | 'A5' | 'Letter' | 'Legal' | 'Executive' | 'Bond';
-    paperType: 'Normal' | 'Bond Paper' | 'Glossy';
+    paperType: string;
     printType: 'Colour' | 'B&W' | 'Costone';
     sides: 'Single-sided' | 'Back-to-Back';
     layout: 'Portrait' | 'Landscape';
@@ -200,7 +200,7 @@ export interface UploadedDoc {
 
 export interface PrintConfig {
   pageSize: 'A4' | 'A3' | 'A2' | 'Letter' | 'Legal' | 'A5' | 'Executive' | 'Bond';
-  paperType: 'Normal' | 'Bond Paper' | 'Glossy';
+  paperType: string;
   printType: 'Color' | 'Black & White' | 'Colour' | 'B&W' | 'Costone' | '';
   sides: 'Single Side' | 'Back to Back' | 'Single-sided' | 'Back-to-Back' | '';
   copies: number;

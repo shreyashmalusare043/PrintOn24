@@ -2,6 +2,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // @ts-ignore Deno resolves URL imports at runtime; the editor's TypeScript resolver does not.
 import JSZip from "https://esm.sh/jszip@3.10.1";
+// @ts-ignore Deno resolves URL imports at runtime; the editor's TypeScript resolver does not.
+import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -9,35 +11,131 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-// Helper to count authentic PDF pages from binary stream
-function countPdfPages(pdfBytes: Uint8Array): number {
-  const text = new TextDecoder("latin1").decode(pdfBytes);
-  // Match standard PDF page definitions
-  const pageMatches = text.match(/\/Type\s*\/Page\b/g);
-  if (pageMatches && pageMatches.length > 0) {
-    return pageMatches.length;
+async function countPdfPages(pdfBytes: Uint8Array): Promise<number> {
+  const pdfDocument = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+  const totalPages = pdfDocument.getPageCount();
+  if (!Number.isSafeInteger(totalPages) || totalPages < 1) {
+    throw new Error("Converted PDF contains no readable pages.");
   }
-  // Fallback to /Count in catalog
-  const countMatch = text.match(/\/Count\s+(\d+)/);
-  if (countMatch && parseInt(countMatch[1], 10) > 0) {
-    return parseInt(countMatch[1], 10);
-  }
-  return 1;
+  return totalPages;
 }
 
 // Extract sheet names from XLSX workbook without altering document
 async function extractWorkbookSheets(fileBuffer: Uint8Array): Promise<string[]> {
-  try {
-    const zip = await JSZip.loadAsync(fileBuffer);
-    const workbookXml = (await zip.file("xl/workbook.xml")?.async("text")) || "";
-    const sheetMatches = Array.from(
-      workbookXml.matchAll(/<sheet[^>]*name="([^"]+)"/gi),
-    ) as RegExpMatchArray[];
-    const sheets = sheetMatches.map((m) => m[1]).filter(Boolean);
-    return sheets.length > 0 ? sheets : ["Sheet1"];
-  } catch {
-    return ["Sheet1"];
+  const zip = await JSZip.loadAsync(fileBuffer);
+  const workbookXml = (await zip.file("xl/workbook.xml")?.async("text")) || "";
+  const sheetMatches = Array.from(
+    workbookXml.matchAll(/<sheet[^>]*name="([^"]+)"/gi),
+  ) as RegExpMatchArray[];
+  const sheets = sheetMatches.map((m) => m[1]).filter(Boolean);
+  if (sheets.length === 0) throw new Error("No worksheets were found in this workbook.");
+  return sheets;
+}
+
+async function configureWorkbook(
+  fileBuffer: Uint8Array,
+  selectedSheet: string,
+  scaling: string,
+): Promise<Uint8Array> {
+  const zip = await JSZip.loadAsync(fileBuffer);
+  const workbookFile = zip.file("xl/workbook.xml");
+  const relationshipsFile = zip.file("xl/_rels/workbook.xml.rels");
+  if (!workbookFile || !relationshipsFile) {
+    throw new Error("This Excel workbook cannot be configured.");
   }
+
+  let workbookXml = await workbookFile.async("text");
+  let relationshipsXml = await relationshipsFile.async("text");
+  const selectedSheetTag = Array.from(workbookXml.matchAll(/<sheet\b[^>]*\/?>/gi))
+    .map((match) => match[0])
+    .find((tag) => new RegExp(`\\bname="${selectedSheet.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`).test(tag));
+  if (!selectedSheetTag) {
+    throw new Error(`Worksheet "${selectedSheet}" was not found.`);
+  }
+
+  const selectedRelationshipId = selectedSheetTag.match(/\br:id="([^"]+)"/)?.[1];
+  if (!selectedRelationshipId) {
+    throw new Error(`Worksheet "${selectedSheet}" has no workbook relationship.`);
+  }
+
+  const relationships = Array.from(
+    relationshipsXml.matchAll(/<Relationship\b[^>]*\/?>/gi),
+    (match) => match[0],
+  );
+  const selectedRelationship = relationships.find((tag) =>
+    new RegExp(`\\bId="${selectedRelationshipId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`).test(tag)
+  );
+  const selectedTarget = selectedRelationship?.match(/\bTarget="([^"]+)"/)?.[1];
+  if (!selectedTarget) {
+    throw new Error(`Worksheet "${selectedSheet}" target could not be resolved.`);
+  }
+
+  const sheetPath = new URL(selectedTarget, "https://workbook.invalid/xl/workbook.xml")
+    .pathname.slice(1);
+  const selectedSheetFile = zip.file(sheetPath);
+  if (!selectedSheetFile) {
+    throw new Error(`Worksheet "${selectedSheet}" content is missing.`);
+  }
+
+  for (const sheetTag of Array.from(workbookXml.matchAll(/<sheet\b[^>]*\/?>/gi), (match) => match[0])) {
+    if (sheetTag === selectedSheetTag) continue;
+    const relationshipId = sheetTag.match(/\br:id="([^"]+)"/)?.[1];
+    const relationship = relationships.find((tag) =>
+      relationshipId && new RegExp(`\\bId="${relationshipId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`).test(tag)
+    );
+    const target = relationship?.match(/\bTarget="([^"]+)"/)?.[1];
+    if (target) {
+      const path = target.startsWith("/") ? target.slice(1) : `xl/${target.replace(/^(\.\/)+/, "")}`;
+      zip.remove(path);
+    }
+    if (relationship) relationshipsXml = relationshipsXml.replace(relationship, "");
+    workbookXml = workbookXml.replace(sheetTag, "");
+  }
+
+  workbookXml = workbookXml.replace(/<workbookView\b([^>]*)\/>/i, (_match, attributes: string) =>
+    `<workbookView${/\bactiveTab="/.test(attributes) ? attributes.replace(/\bactiveTab="[^"]*"/, 'activeTab="0"') : `${attributes} activeTab="0"`}/>`,
+  );
+  if (scaling !== "No Scaling") {
+    let sheetXml = await selectedSheetFile.async("text");
+    const fitWidth = scaling === "Fit Sheet on One Page" || scaling === "Fit All Columns on One Page" ? 1 : 0;
+    const fitHeight = scaling === "Fit Sheet on One Page" || scaling === "Fit All Rows on One Page" ? 1 : 0;
+    const updatePageSetup = (_match: string, attributes: string) => {
+      const updated = attributes
+        .replace(/\s(?:fitToWidth|fitToHeight|scale|orientation)="[^"]*"/g, "");
+      return `<pageSetup${updated} orientation="landscape" fitToWidth="${fitWidth}" fitToHeight="${fitHeight}"/>`;
+    };
+    if (/<pageSetup\b[^>]*\/>/i.test(sheetXml)) {
+      sheetXml = sheetXml.replace(/<pageSetup\b([^>]*)\/>/i, updatePageSetup);
+    } else if (/<pageSetup\b[^>]*>[\s\S]*?<\/pageSetup>/i.test(sheetXml)) {
+      sheetXml = sheetXml.replace(/<pageSetup\b([^>]*)>[\s\S]*?<\/pageSetup>/i, updatePageSetup);
+    } else {
+      const pageSetup = `<pageSetup orientation="landscape" fitToWidth="${fitWidth}" fitToHeight="${fitHeight}"/>`;
+      const nextElement = /<(?:headerFooter|rowBreaks|colBreaks|customProperties|cellWatches|ignoredErrors|smartTags|drawing|legacyDrawing|picture|oleObjects|controls|webPublishItems|tableParts|extLst)\b/i;
+      const insertAt = sheetXml.search(nextElement);
+      sheetXml = insertAt >= 0
+        ? `${sheetXml.slice(0, insertAt)}${pageSetup}${sheetXml.slice(insertAt)}`
+        : sheetXml.replace(/<\/worksheet>/i, `${pageSetup}</worksheet>`);
+    }
+    if (/<sheetPr\b[^>]*>/.test(sheetXml)) {
+      if (/<pageSetUpPr\b[^>]*\/>/.test(sheetXml)) {
+        sheetXml = sheetXml.replace(/<pageSetUpPr\b([^>]*)\/>/i, (_match, attributes: string) =>
+          `<pageSetUpPr${attributes.replace(/\sfitToPage="[^"]*"/g, "")} fitToPage="1"/>`,
+        );
+      } else {
+        sheetXml = sheetXml.replace(/<sheetPr\b([^>]*)\/>/i, '<sheetPr$1><pageSetUpPr fitToPage="1"/></sheetPr>');
+        if (!/<pageSetUpPr\b/i.test(sheetXml)) {
+          sheetXml = sheetXml.replace(/<sheetPr\b([^>]*)>/i, '<sheetPr$1><pageSetUpPr fitToPage="1"/>');
+        }
+      }
+    } else {
+      sheetXml = sheetXml.replace(/<worksheet\b([^>]*)>/i, '<worksheet$1><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>');
+    }
+    zip.file(sheetPath, sheetXml);
+  }
+
+  zip.file("xl/workbook.xml", workbookXml);
+  zip.file("xl/_rels/workbook.xml.rels", relationshipsXml);
+  return await zip.generateAsync({ type: "uint8array" });
 }
 
 // Deno is provided by the runtime, but may not be declared in the editor's TypeScript environment.
@@ -61,6 +159,7 @@ Deno.serve(async (req) => {
     let fileName = "document";
     let fileType = "DOCX";
     let fileBuffer: Uint8Array | null = null;
+    let inspectOnly = false;
     let selectedSheet = "";
     let scaling = "No Scaling";
     let sheets: string[] = ["Sheet1"];
@@ -84,6 +183,7 @@ Deno.serve(async (req) => {
       if (formData.get("fileType")) fileType = String(formData.get("fileType")).toUpperCase();
       if (formData.get("selectedSheet")) selectedSheet = String(formData.get("selectedSheet"));
       if (formData.get("scaling")) scaling = String(formData.get("scaling"));
+      inspectOnly = formData.get("inspectOnly") === "true";
       if (formData.get("userId")) userId = String(formData.get("userId"));
       if (formData.get("shopId")) shopId = String(formData.get("shopId"));
       if (formData.get("docId")) docId = String(formData.get("docId"));
@@ -93,6 +193,7 @@ Deno.serve(async (req) => {
       if (body.fileType) fileType = body.fileType.toUpperCase();
       if (body.selectedSheet) selectedSheet = body.selectedSheet;
       if (body.scaling) scaling = body.scaling;
+      inspectOnly = body.inspectOnly === true;
       if (body.sheets && Array.isArray(body.sheets)) sheets = body.sheets;
       if (body.userId) userId = body.userId;
       if (body.shopId) shopId = body.shopId;
@@ -124,11 +225,28 @@ Deno.serve(async (req) => {
     }
 
     const isPdf = fileType === "PDF" || fileName.toLowerCase().endsWith(".pdf");
+    const isXlsx = fileType === "XLSX" || fileName.toLowerCase().endsWith(".xlsx");
     const isXls = fileType.includes("XLS") || fileType.includes("SHEET") || fileName.match(/\.xlsx?$/i);
 
     // If Excel, inspect workbook sheets for the configuration dropdown
-    if (isXls) {
+    if (isXls && !isXlsx) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: "Sheet selection and scaling require an .xlsx workbook. Save this .xls file as .xlsx and upload it again.",
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 415 }
+      );
+    }
+    if (isXlsx) {
       sheets = await extractWorkbookSheets(fileBuffer);
+    }
+
+    if (inspectOnly) {
+      return new Response(
+        JSON.stringify({ success: true, inspected: true, sheets }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
+      );
     }
 
     // 1. Store Pristine Original File in Supabase Storage
@@ -166,16 +284,14 @@ Deno.serve(async (req) => {
       console.log(`Sending ${fileName} to Gotenberg at ${gotenbergUrl}/forms/libreoffice/convert`);
       
       try {
+        const conversionInput = isXlsx && selectedSheet
+          ? await configureWorkbook(fileBuffer, selectedSheet, scaling)
+          : fileBuffer;
         const form = new FormData();
-        const blobBuffer = new ArrayBuffer(fileBuffer.byteLength);
-        new Uint8Array(blobBuffer).set(fileBuffer);
+        const blobBuffer = new ArrayBuffer(conversionInput.byteLength);
+        new Uint8Array(blobBuffer).set(conversionInput);
         const blob = new Blob([blobBuffer], { type: "application/octet-stream" });
         form.append("files", blob, fileName);
-
-        // Support LibreOffice conversion parameters
-        if (scaling === "Fit Sheet on One Page" || scaling === "Fit All Columns on One Page") {
-          form.append("nativePageRanges", "1");
-        }
 
         const gotenbergRes = await fetch(`${gotenbergUrl}/forms/libreoffice/convert`, {
           method: "POST",
@@ -207,7 +323,7 @@ Deno.serve(async (req) => {
     }
 
     // 3. Count exact PDF pages from the generated PDF binary stream
-    const totalPages = countPdfPages(convertedPdfBytes);
+    const totalPages = await countPdfPages(convertedPdfBytes);
 
     // 4. Save converted PDF to Supabase Storage bucket 'print_documents'
     const pdfFileName = `${fileName.replace(/\.[^/.]+$/, "")}_converted.pdf`;
