@@ -41,6 +41,7 @@ import { fetchUploadPageAds, getShopAvailablePaperSizes, getShopPaperPricingDeta
 import { formatFullName } from '../../utils/nameFormat';
 import { supabase } from '../../db/supabase';
 import { UniformAlertModal } from '../common/UniformAlertModal';
+import { getPrintModeEligibility, type PrintSides, type PrintType } from '../../lib/printEligibility';
 
 interface UploadConfigurationViewProps {
   onProceedToCheckout: () => void;
@@ -70,12 +71,19 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
     validateCustomRanges,
     isDocConfigValid,
     printConfig,
-    updatePrintConfig,
+    updatePrintConfig: updatePrintConfigContext,
+    applyPrintConfigToDocuments,
     priceCalc,
     currentDocPriceCalc,
     getDocPrice,
     clearUploadSession
   } = usePrintPerfect();
+  const [selectedConfigTargetIds, setSelectedConfigTargetIds] = useState<string[]>([]);
+  const [appliedConfigTargetIds, setAppliedConfigTargetIds] = useState<string[]>([]);
+  const updatePrintConfig = (updates: Parameters<typeof updatePrintConfigContext>[0]) => {
+    setAppliedConfigTargetIds([]);
+    updatePrintConfigContext(updates);
+  };
 
   // Fresh Upload Session: clear any previous/recent documents when entering upload view
   useEffect(() => {
@@ -681,6 +689,23 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
       : printConfig.sides === 'Single Side' || printConfig.sides === 'Single-sided'
       ? 'Single Side'
       : '';
+  const printModeEligibility = getPrintModeEligibility(
+    selectedEnterprise.pricing,
+    printConfig.paperType && printConfig.paperType !== 'Normal'
+      ? printConfig.paperType
+      : printConfig.pageSize || ''
+  );
+  const isEligibilityReady = selectedEnterprise.pricing.eligibilitySettingsLoaded === true;
+  const isPrintModeEligible = (type: PrintType, sides: PrintSides) =>
+    isEligibilityReady && printModeEligibility[type][sides];
+  const hasEligiblePrintType = (type: PrintType) =>
+    currentPrintSide
+      ? isPrintModeEligible(type, currentPrintSide as PrintSides)
+      : isPrintModeEligible(type, 'Single Side') || isPrintModeEligible(type, 'Back to Back');
+  const hasEligiblePrintSide = (side: PrintSides) =>
+    currentPrintType
+      ? isPrintModeEligible(currentPrintType as PrintType, side)
+      : isPrintModeEligible('Color', side) || isPrintModeEligible('Black & White', side);
 
   return (
     <div className="w-full max-w-7xl mx-auto px-4 lg:px-6 pb-28 select-none font-sans">
@@ -822,10 +847,10 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
           {/* 3. Multi-file Document Queue Management (1-by-1 Add & Delete) */}
           {uploadedDocs.length > 0 && (
             <div key="queued-docs-section" className="bg-white rounded-3xl p-4 border border-red-100 shadow-xs space-y-3">
-              <div className="flex items-center justify-between border-b border-red-50 pb-2">
-                <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-red-50 pb-2">
+                <div className="flex min-w-0 items-center gap-2">
                   <FileText className="w-4 h-4 text-[#FF1300]" />
-                  <h4 className="text-xs font-bold text-slate-900 font-heading">
+                  <h4 className="min-w-0 text-xs font-bold text-slate-900 font-heading">
                     Queued Print Documents ({uploadedDocs.length})
                   </h4>
                 </div>
@@ -838,6 +863,52 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                   <span>{"Add Another File"}</span>
                 </button>
               </div>
+
+              {uploadedDocs.length > 1 && (
+                <div className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                  <p className="break-words text-xs font-bold text-slate-800">
+                    Configuration source: {currentDoc?.fileName || 'Select a document below'}
+                  </p>
+                  <p className="text-[10px] text-slate-500">
+                    Select target documents with their checkboxes. Clicking a document opens it as the configuration source.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={!currentDoc || selectedConfigTargetIds.length > 0}
+                      onClick={() => {
+                        const targetIds = uploadedDocs.map(doc => doc.id);
+                        applyPrintConfigToDocuments(targetIds, printConfig);
+                        setAppliedConfigTargetIds(targetIds);
+                        setSelectedConfigTargetIds([]);
+                        toast.success('Current configuration applied to all documents.');
+                      }}
+                      className="rounded-full bg-[#FF1300] px-3 py-1.5 text-xs font-bold text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-40"
+                      title={selectedConfigTargetIds.length > 0 ? 'Unselect all selected documents before applying to all.' : undefined}
+                    >
+                      Apply all
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!currentDoc || selectedConfigTargetIds.length === 0}
+                      onClick={() => {
+                        if (!currentDoc || selectedConfigTargetIds.length === 0) {
+                          toast.error('Select at least one target document.');
+                          return;
+                        }
+                        applyPrintConfigToDocuments(selectedConfigTargetIds, printConfig);
+                        setAppliedConfigTargetIds(ids => [
+                          ...new Set([...ids, ...selectedConfigTargetIds])
+                        ]);
+                        toast.success(`Configuration applied to ${selectedConfigTargetIds.length} selected document${selectedConfigTargetIds.length === 1 ? '' : 's'}.`);
+                      }}
+                      className="rounded-full border border-[#FF1300] bg-white px-3 py-1.5 text-xs font-bold text-[#FF1300] transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      Apply selected ({selectedConfigTargetIds.length})
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Document List with Individual Delete & Selection */}
               <div className="space-y-2">
@@ -854,8 +925,14 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                   return (
                     <div
                       key={doc.id}
-                      onClick={() => selectDocument(doc.id)}
-                      className={`p-3 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                      onClick={() => {
+                        if (!isCurrent) {
+                          selectDocument(doc.id);
+                          setSelectedConfigTargetIds([]);
+                          setAppliedConfigTargetIds([]);
+                        }
+                      }}
+                      className={`flex flex-col items-stretch gap-3 rounded-2xl border p-3 transition-all cursor-pointer sm:flex-row sm:items-center sm:justify-between ${
                         isReady
                           ? `border-emerald-500 bg-emerald-50/20 ${
                               isCurrent ? 'ring-2 ring-emerald-500/40 shadow-xs' : 'hover:border-emerald-600'
@@ -865,7 +942,23 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                             }`
                       }`}
                     >
-                      <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <div className="flex min-w-0 flex-1 items-start gap-2.5 sm:items-center sm:gap-3">
+                        <input
+                          type="checkbox"
+                          checked={!isCurrent && selectedConfigTargetIds.includes(doc.id)}
+                          disabled={isCurrent}
+                          aria-label={`Apply current configuration to ${doc.fileName}`}
+                          title={isCurrent ? 'This document is the configuration source' : 'Select this document as a configuration target'}
+                          onClick={event => event.stopPropagation()}
+                          onChange={event => {
+                            setSelectedConfigTargetIds(ids =>
+                              event.target.checked
+                                ? [...new Set([...ids, doc.id])]
+                                : ids.filter(id => id !== doc.id)
+                            );
+                          }}
+                          className="h-4 w-4 shrink-0 cursor-pointer accent-[#FF1300]"
+                        />
                         <div
                           className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
                             isReady
@@ -885,10 +978,23 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                         </div>
 
                         <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <p className="text-xs font-bold text-slate-900 truncate max-w-[180px] sm:max-w-xs" title={doc.fileName}>
+                          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                            <p className="min-w-0 flex-[1_1_100%] whitespace-normal break-words text-xs font-bold leading-snug text-slate-900 sm:flex-none" title={doc.fileName}>
                               {doc.fileName}
                             </p>
+                            {isCurrent ? (
+                              <span className="text-[9px] font-black uppercase tracking-wider text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full shrink-0">
+                                Config source
+                              </span>
+                            ) : appliedConfigTargetIds.includes(doc.id) ? (
+                              <span className="text-[9px] font-black uppercase tracking-wider text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full shrink-0">
+                                ✓ Applied
+                              </span>
+                            ) : (
+                              <span className="text-[9px] font-bold uppercase tracking-wider text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full shrink-0">
+                                Not applied yet
+                              </span>
+                            )}
                             {isReady ? (
                               <span className="text-[9px] font-black uppercase tracking-wider text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full flex items-center gap-1 shrink-0" title="Configured (✓)">
 
@@ -906,7 +1012,7 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                               </span>
                             )}
                           </div>
-                          <div className="flex items-center gap-1.5 mt-1 flex-wrap text-[10px]">
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px]">
                             <span className="text-slate-500">
                               {doc.conversionStatus === 'failed'
                                 ? 'Conversion failed'
@@ -924,7 +1030,7 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                           </div>
                         </div>
                       </div>
-                      <div className="flex items-center gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
+                      <div className="flex shrink-0 items-center justify-end gap-1.5 self-end sm:self-auto" onClick={e => e.stopPropagation()}>
                         {/* Eye / View icon: Hide Preview (eye) icon for images only; keep for documents/PDFs */}
                         {!isDocImg && (
                           <button
@@ -1213,7 +1319,12 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
 
               <div className={`flex items-center gap-1.5 bg-slate-100 p-0.5 rounded-xl shrink-0 ${isCustomRange ? 'pointer-events-none' : ''}`}>
                 {(['Single Side', 'Back to Back'] as const).map(side => {
-                  const isSideDisabled = isCustomRange || (side === 'Back to Back' && isSinglePageSingleCopy);
+                  const isEligibleForSelectedType = hasEligiblePrintSide(side);
+                  const isSideDisabled =
+                    isCustomRange ||
+                    !isEligibilityReady ||
+                    !isEligibleForSelectedType ||
+                    (side === 'Back to Back' && isSinglePageSingleCopy);
                   return (
                     <button
                       key={side}
@@ -1231,10 +1342,12 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                       title={
                         side === 'Back to Back' && isSinglePageSingleCopy
                           ? 'Disabled: Back-to-Back requires multiple pages or copies > 1'
+                          : !isEligibleForSelectedType
+                          ? 'This print mode is not offered for the selected shop and paper.'
                           : undefined
                       }
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all ${
-                        isSideDisabled && side === 'Back to Back'
+                        isSideDisabled
                           ? 'opacity-40 cursor-not-allowed text-slate-400 bg-slate-100'
                           : currentPrintSide === side
                           ? 'bg-[#FF1300] text-white shadow-xs font-heading'
@@ -1282,10 +1395,18 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
               <div className={`flex items-center gap-1.5 bg-slate-100 p-0.5 rounded-xl shrink-0 ${isCustomRange ? 'pointer-events-none' : ''}`}>
                 <button
                   type="button"
+                  disabled={
+                    isCustomRange ||
+                    !isEligibilityReady ||
+                    !hasEligiblePrintType('Color')
+                  }
                   tabIndex={isCustomRange ? -1 : 0}
-                  onClick={() => !isCustomRange && updatePrintConfig({ printType: 'Color' })}
+                  onClick={() => updatePrintConfig({ printType: 'Color' })}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1.5 ${
-                    currentPrintType === 'Color'
+                    !isEligibilityReady ||
+                    !hasEligiblePrintType('Color')
+                      ? 'opacity-40 cursor-not-allowed text-slate-400'
+                      : currentPrintType === 'Color'
                       ? 'bg-[#FF1300] text-white shadow-xs font-heading'
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
@@ -1302,10 +1423,18 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
 
                 <button
                   type="button"
+                  disabled={
+                    isCustomRange ||
+                    !isEligibilityReady ||
+                    !hasEligiblePrintType('Black & White')
+                  }
                   tabIndex={isCustomRange ? -1 : 0}
-                  onClick={() => !isCustomRange && updatePrintConfig({ printType: 'Black & White' })}
+                  onClick={() => updatePrintConfig({ printType: 'Black & White' })}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1.5 ${
-                    currentPrintType === 'Black & White'
+                    !isEligibilityReady ||
+                    !hasEligiblePrintType('Black & White')
+                      ? 'opacity-40 cursor-not-allowed text-slate-400'
+                      : currentPrintType === 'Black & White'
                       ? 'bg-[#FF1300] text-white shadow-xs font-heading'
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
@@ -1320,6 +1449,7 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                   />
                 </button>
               </div>
+
             </div>
 
             {/* Custom Range Explanatory Tooltip on Hover / Tap (on Separate Lines) */}
@@ -1616,9 +1746,12 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                           <div className="flex items-center justify-end gap-1">
                             <button
                               type="button"
+                              disabled={!isPrintModeEligible('Color', rule.sides)}
                               onClick={() => updateRule(rule.id, { printType: 'Color' })}
                               className={`px-2.5 py-1 rounded text-[11px] font-bold transition-all ${
-                                rule.printType === 'Color'
+                                !isPrintModeEligible('Color', rule.sides)
+                                  ? 'opacity-40 cursor-not-allowed bg-slate-100 text-slate-400'
+                                  : rule.printType === 'Color'
                                   ? 'bg-[#FF1300] text-white shadow-xs'
                                   : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
                               }`}
@@ -1627,9 +1760,12 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                             </button>
                             <button
                               type="button"
+                              disabled={!isPrintModeEligible('Black & White', rule.sides)}
                               onClick={() => updateRule(rule.id, { printType: 'Black & White' })}
                               className={`px-2.5 py-1 rounded text-[11px] font-bold transition-all ${
-                                rule.printType === 'Black & White'
+                                !isPrintModeEligible('Black & White', rule.sides)
+                                  ? 'opacity-40 cursor-not-allowed bg-slate-100 text-slate-400'
+                                  : rule.printType === 'Black & White'
                                   ? 'bg-slate-900 text-white shadow-xs'
                                   : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
                               }`}
@@ -1645,9 +1781,12 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                           <div className="flex gap-1">
                             <button
                               type="button"
+                              disabled={!isPrintModeEligible(rule.printType, 'Single Side')}
                               onClick={() => updateRule(rule.id, { sides: 'Single Side' })}
                               className={`px-2 py-0.5 rounded transition-all ${
-                                rule.sides === 'Single Side'
+                                !isPrintModeEligible(rule.printType, 'Single Side')
+                                  ? 'opacity-40 cursor-not-allowed bg-slate-100 text-slate-400'
+                                  : rule.sides === 'Single Side'
                                   ? 'bg-slate-800 text-white font-bold shadow-xs'
                                   : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
                               }`}
@@ -1656,7 +1795,9 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                             </button>
                             {(() => {
                               const isSinglePage = !isNaN(fromNum) && !isNaN(toNum) && fromNum === toNum;
-                              const isB2BDisabled = isSinglePage && printConfig.copies <= 1;
+                              const isB2BDisabled =
+                                !isPrintModeEligible(rule.printType, 'Back to Back') ||
+                                (isSinglePage && printConfig.copies <= 1);
                               return (
                                 <button
                                   type="button"
@@ -1671,7 +1812,7 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                                   }`}
                                   title={
                                     isB2BDisabled
-                                      ? 'Back to Back is disabled when start and end pages are the same with 1 copy.'
+                                      ? 'This mode is unavailable for the selected shop and paper or disabled for a single page with 1 copy.'
                                       : 'Back to Back'
                                   }
                                 >

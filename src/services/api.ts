@@ -215,12 +215,16 @@ type ShopDynamicPaperTypeRow = {
   bw_price: number | string;
   color_price: number | string;
   is_active: boolean;
+  eligible_bw_single?: boolean;
+  eligible_bw_back_to_back?: boolean;
+  eligible_color_single?: boolean;
+  eligible_color_back_to_back?: boolean;
 };
 
 async function getShopDynamicPaperTypeRows(shopId: string): Promise<ShopDynamicPaperTypeRow[]> {
   const { data, error } = await supabase
     .from('shop_dynamic_paper_types')
-    .select('name, bw_price, color_price, is_active')
+    .select('*')
     .eq('shop_id', shopId)
     .eq('is_active', true)
     .order('name');
@@ -260,7 +264,8 @@ const DEFAULT_SHOP_PRINT_PRICING: PrintEnterprise['pricing'] = {
   bondPaperExtra: 0,
   glossyPaperExtra: 0,
   a3Multiplier: 1,
-  a2Multiplier: 1
+  a2Multiplier: 1,
+  eligibilitySettingsLoaded: false
 };
 
 function optionalShopRate(value: unknown): number | undefined {
@@ -283,7 +288,13 @@ function mapDynamicPaperTypes(value: unknown): NonNullable<PrintEnterprise['pric
       bwDoublePrice: optionalShopRate(row.bw_double ?? row.bw_double_price),
       colorDoublePrice: optionalShopRate(row.color_double ?? row.color_double_price),
       costonePrice: optionalShopRate(row.costone_price),
-      costoneDoublePrice: optionalShopRate(row.costone_double ?? row.costone_double_price)
+      costoneDoublePrice: optionalShopRate(row.costone_double ?? row.costone_double_price),
+      eligibility: {
+        bwSingle: typeof row.eligible_bw_single === 'boolean' ? row.eligible_bw_single : undefined,
+        bwBackToBack: typeof row.eligible_bw_back_to_back === 'boolean' ? row.eligible_bw_back_to_back : undefined,
+        colorSingle: typeof row.eligible_color_single === 'boolean' ? row.eligible_color_single : undefined,
+        colorBackToBack: typeof row.eligible_color_back_to_back === 'boolean' ? row.eligible_color_back_to_back : undefined
+      }
     }];
   });
 }
@@ -354,6 +365,12 @@ function mapShopPricing(
   });
 
   const dynamicPaperTypes = mapDynamicPaperTypes(row.dynamic_paper_types);
+  const eligibilitySettingsLoaded = [
+    row.eligible_bw_single,
+    row.eligible_bw_back_to_back,
+    row.eligible_color_single,
+    row.eligible_color_back_to_back
+  ].every(value => typeof value === 'boolean');
   dynamicPaperTypes.forEach(paper => {
     const matchesSize = configuredSizeNames.find(size => size.toLowerCase() === paper.name.toLowerCase());
     if (matchesSize) {
@@ -391,6 +408,19 @@ function mapShopPricing(
     colourDouble: optionalShopRate(row.color_double),
     shopId: row.shop_id || shopId,
     isConfigured: hasConfiguredRates,
+    bwPricingMode: row.bw_pricing_mode === 'page' ? 'page' : 'print',
+    colorPricingMode: row.color_pricing_mode === 'page' ? 'page' : 'print',
+    shortPageLimit: Math.max(0, Number(row.short_page_limit) || 0),
+    bwShortPageRate: optionalShopRate(row.bw_short_page_rate) ?? 0,
+    colorShortPageRate: optionalShopRate(row.color_short_page_rate) ?? 0,
+    eligibilitySettingsLoaded,
+    eligibilitySettingsError: !eligibilitySettingsLoaded,
+    eligibility: {
+      bwSingle: typeof row.eligible_bw_single === 'boolean' ? row.eligible_bw_single : undefined,
+      bwBackToBack: typeof row.eligible_bw_back_to_back === 'boolean' ? row.eligible_bw_back_to_back : undefined,
+      colorSingle: typeof row.eligible_color_single === 'boolean' ? row.eligible_color_single : undefined,
+      colorBackToBack: typeof row.eligible_color_back_to_back === 'boolean' ? row.eligible_color_back_to_back : undefined
+    },
     bondPaperRate: optionalShopRate(row.bond_rate),
     glossyPaperRate: optionalShopRate(row.glossy_rate),
     paperSizeRates,
@@ -428,7 +458,7 @@ export async function getPrintShops(): Promise<RemoteShopData[]> {
 
     const { data: dynamicTypeRows, error: dynamicTypeError } = await supabase
       .from('shop_dynamic_paper_types')
-      .select('shop_id, name, bw_price, color_price, is_active')
+      .select('*')
       .in('shop_id', shopIds)
       .eq('is_active', true);
     if (dynamicTypeError) throw dynamicTypeError;

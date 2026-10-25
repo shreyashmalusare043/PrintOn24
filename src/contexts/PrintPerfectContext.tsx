@@ -52,6 +52,7 @@ import {
   submitShopReview
 } from '../services/api';
 import { getPdfPageCount } from '../utils/pdfPageCount';
+import { isPrintModeEligible } from '../lib/printEligibility';
 
 interface PriceCalculation {
   effectivePages: number;
@@ -369,6 +370,7 @@ interface PrintPerfectContextType {
   isDocConfigValid: (doc: UploadedDoc | null | undefined) => { isValid: boolean; error?: string };
   printConfig: PrintConfig;
   updatePrintConfig: (updates: Partial<PrintConfig>) => void;
+  applyPrintConfigToDocuments: (documentIds: string[], config: PrintConfig) => void;
   resetPrintConfig: () => void;
   priceCalc: PriceCalculation;
   currentDocPriceCalc: PriceCalculation;
@@ -745,7 +747,9 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
               pricing: {
                 ...enterprise.pricing,
                 shopId: selectedEnterpriseId,
-                isConfigured: false
+                isConfigured: false,
+                eligibilitySettingsLoaded: false,
+                eligibilitySettingsError: false
               }
             }
           : enterprise
@@ -765,6 +769,23 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
       })
       .catch(error => {
         console.error('Failed to refresh selected shop pricing:', error);
+        if (!isCurrent) return;
+        setEnterprises(current =>
+          current.map(enterprise =>
+            enterprise.id === selectedEnterpriseId
+              ? {
+                  ...enterprise,
+                  pricing: {
+                    ...enterprise.pricing,
+                    shopId: selectedEnterpriseId,
+                    isConfigured: false,
+                    eligibilitySettingsLoaded: false,
+                    eligibilitySettingsError: true
+                  }
+                }
+              : enterprise
+          )
+        );
       });
 
     return () => {
@@ -1171,7 +1192,7 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
       pageSize: 'A4',
       paperType: 'Normal',
       printType: '' as any,
-      sides: '' as any,
+      sides: calculatedPages === 1 ? 'Single Side' : '' as any,
       layout: detectedLayout,
       pageRangeType: 'All Pages',
       selectedPageRange: '',
@@ -1554,7 +1575,6 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
           );
         } catch {}
 
-        // Persist exact selected print config to database table
         try {
           void supabase.from('uploaded_documents').update({
             print_config: next
@@ -1570,6 +1590,42 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
         }
       }
       return next;
+    });
+  };
+
+  const applyPrintConfigToDocuments = (documentIds: string[], config: PrintConfig) => {
+    const targetIds = new Set(documentIds);
+    if (targetIds.size === 0) return;
+
+    setUploadedDocs(docs =>
+      docs.map(doc => targetIds.has(doc.id) ? { ...doc, printConfig: config } : doc)
+    );
+    if (currentDoc && targetIds.has(currentDoc.id)) {
+      const updatedCurrentDoc = { ...currentDoc, printConfig: config };
+      setCurrentDoc(updatedCurrentDoc);
+      setPrintConfig(config);
+      try {
+        const channel = new BroadcastChannel('printon24_pdf_preview');
+        channel.postMessage({
+          type: 'CONFIG_UPDATE',
+          docId: currentDoc.id,
+          config,
+          doc: updatedCurrentDoc
+        });
+        channel.close();
+      } catch {}
+    }
+
+    uploadedDocs.filter(doc => targetIds.has(doc.id)).forEach(doc => {
+      void supabase.from('uploaded_documents').update({
+        print_config: config
+      }).eq('id', doc.id).then(({ error }) => {
+        if (error) {
+          console.error(`Failed to apply print config to document ${doc.id}:`, error);
+        }
+      }, (dbErr: unknown) => {
+        console.error(`Failed to apply print config to document ${doc.id}:`, dbErr);
+      });
     });
   };
 
@@ -1593,7 +1649,7 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
         layout: doc.printConfig?.layout || (isLandscapeDoc ? 'Landscape' : 'Portrait'),
         paperType: doc.printConfig?.paperType || 'Normal',
         printType: doc.printConfig?.printType || '',
-        sides: doc.printConfig?.sides || '',
+        sides: doc.printConfig?.sides || (doc.totalPages === 1 ? 'Single Side' : ''),
         selectedPageRange: doc.printConfig?.selectedPageRange || '',
         customRanges: doc.printConfig?.customRanges || []
       };
@@ -1639,10 +1695,42 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
     }
   };
 
+  const getDocPrintConfig = (doc: UploadedDoc): PrintConfig =>
+    (doc.id === currentDoc?.id ? printConfig : doc.printConfig) || printConfig;
+
+  const getConfiguredPrintPageCount = (doc: UploadedDoc, cfg: PrintConfig): number => {
+    const totalPages = Math.max(0, doc.totalPages || 1);
+    if (cfg.pageRangeType === 'Custom Range') {
+      const printedPages = new Set<number>();
+      cfg.customRanges?.forEach(range => {
+        const from = Math.max(1, Math.ceil(range.fromPage));
+        const to = Math.min(totalPages, Math.floor(range.toPage));
+        for (let page = from; page <= to; page++) printedPages.add(page);
+      });
+      return printedPages.size;
+    }
+    if (cfg.pageRangeType === 'Selected Pages' || cfg.pageRangeType === 'Selected pages') {
+      const validation = validateSelectedPageRange(cfg.selectedPageRange, totalPages);
+      return validation.isValid ? validation.pageCount : 0;
+    }
+    return totalPages;
+  };
+
+  const pricingDocuments = uploadedDocs.length > 0
+    ? uploadedDocs
+    : currentDoc
+    ? [currentDoc]
+    : [];
+  const aggregatePrintPages = pricingDocuments.reduce(
+    (total, doc) => total + getConfiguredPrintPageCount(doc, getDocPrintConfig(doc)),
+    0
+  );
+
   // 6. Live Price Calculation (Dynamic calculation, NO GST, handles Custom Ranges)
   const calculateSingleDocPrice = (
     doc: UploadedDoc,
-    cfg: PrintConfig
+    cfg: PrintConfig,
+    totalOrderPages: number
   ): PriceCalculation => {
     const invalidPrice = (error: string): PriceCalculation => ({
       effectivePages: 0,
@@ -1659,6 +1747,9 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
     const pricing = selectedEnterprise.pricing;
     if (!pricing.isConfigured || pricing.shopId !== selectedEnterprise.id) {
       return invalidPrice(`Pricing for ${selectedEnterprise.name} is not available yet.`);
+    }
+    if (pricing.eligibilitySettingsLoaded !== true) {
+      return invalidPrice(`Print eligibility settings for ${selectedEnterprise.name} are unavailable.`);
     }
 
     if (
@@ -1745,10 +1836,33 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
     const printType = cfg.printType || 'Color';
     const sides = cfg.sides || 'Single Side';
-    const baseRate = resolvePageRate(printType, sides);
-    if (baseRate === null) {
+    const isBackToBackPrint = isBackToBack(sides);
+    const isBlackAndWhite = printType === 'Black & White' || printType === 'B&W';
+    const pricingMode = isBlackAndWhite
+      ? pricing.bwPricingMode
+      : pricing.colorPricingMode;
+    const shortDocumentRate = (type: string, regularRate: number) => {
+      const limit = pricing.shortPageLimit ?? 0;
+      if (limit <= 0 || totalOrderPages > limit) return regularRate;
+      const isBW = type === 'Black & White' || type === 'B&W';
+      return isBW
+        ? pricing.bwShortPageRate ?? regularRate
+        : pricing.colorShortPageRate ?? regularRate;
+    };
+    const selectedPaper = cfg.paperType && cfg.paperType !== 'Normal'
+      ? cfg.paperType
+      : cfg.pageSize;
+    if (
+      !isCustomRange &&
+      !isPrintModeEligible(pricing, selectedPaper, printType, sides)
+    ) {
+      return invalidPrice(`${printType} ${sides} printing is unavailable for ${selectedPaper} at ${selectedEnterprise.name}. Select an available print mode.`);
+    }
+    const regularRate = resolvePageRate(printType, sides);
+    if (regularRate === null) {
       return invalidPrice(`The selected shop has no valid ${cfg.pageSize} ${cfg.paperType} ${printType} ${sides} rate configured.`);
     }
+    const baseRate = shortDocumentRate(printType, regularRate);
 
     let subtotal = 0;
     let sheetsUsed = 0;
@@ -1772,6 +1886,10 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
           const pagePrintType = matchingRule.printType;
           const pageSides = matchingRule.sides;
 
+          if (!isPrintModeEligible(pricing, selectedPaper, pagePrintType, pageSides)) {
+            return invalidPrice(`${pagePrintType} ${pageSides} printing is unavailable for ${cfg.pageSize} at ${selectedEnterprise.name}.`);
+          }
+
           const pageRate = resolvePageRate(pagePrintType, pageSides);
           if (pageRate === null) {
             return invalidPrice(`The selected shop has no valid ${cfg.pageSize} ${cfg.paperType} ${pagePrintType} ${pageSides} rate configured.`);
@@ -1792,9 +1910,20 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
         }
 
         rangedPageCounts.forEach(group => {
-          const rate = resolvePageRate(group.printType, group.sides);
+          const regularRate = resolvePageRate(group.printType, group.sides);
+          const rate = regularRate === null
+            ? null
+            : shortDocumentRate(group.printType, regularRate);
           if (rate !== null) {
-            totalCostPerSet += group.count * rate;
+            const groupIsBlackAndWhite =
+              group.printType === 'Black & White' || group.printType === 'B&W';
+            const groupPricingMode = groupIsBlackAndWhite
+              ? pricing.bwPricingMode
+              : pricing.colorPricingMode;
+            const billableUnits = isBackToBack(group.sides) && groupPricingMode === 'page'
+              ? Math.ceil(group.count / 2)
+              : group.count;
+            totalCostPerSet += billableUnits * rate;
           }
         });
 
@@ -1812,7 +1941,10 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
       sheetsUsed = isBackToBackGlobal
         ? Math.ceil(compressedPages / 2) * cfg.copies
         : compressedPages * cfg.copies;
-      subtotal = Number((effectivePages * baseRate * cfg.copies).toFixed(2));
+      const billableUnits = isBackToBackPrint && pricingMode === 'page'
+        ? Math.ceil(compressedPages / 2)
+        : effectivePages;
+      subtotal = Number((billableUnits * baseRate * cfg.copies).toFixed(2));
     }
 
     return {
@@ -1828,8 +1960,8 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
   };
 
   const getDocPrice = (doc: UploadedDoc): PriceCalculation => {
-    const cfg = (doc.id === currentDoc?.id ? printConfig : doc.printConfig) || printConfig;
-    return calculateSingleDocPrice(doc, cfg);
+    const cfg = getDocPrintConfig(doc);
+    return calculateSingleDocPrice(doc, cfg, aggregatePrintPages);
   };
 
   const currentDocPriceCalc: PriceCalculation = currentDoc
@@ -3193,6 +3325,7 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
         isDocConfigValid,
         printConfig,
         updatePrintConfig,
+        applyPrintConfigToDocuments,
         resetPrintConfig,
         priceCalc,
         currentDocPriceCalc,

@@ -41,6 +41,8 @@ import { CookieConsentBanner } from '../common/CookieConsentBanner';
 
 import type { PrintOrder } from '../../types/printperfect';
 
+const handledShopUrls = new Set<string>();
+
 type ActiveView =
   | 'home'
   | 'specific_enterprise'
@@ -65,9 +67,9 @@ const PrintPerfectAppContent: React.FC = () => {
   const {
     activeReceiptOrder,
     setActiveReceiptOrder,
-    enterprises,
     selectEnterprise,
     selectedEnterprise,
+    verifyAndSelectShopByCode,
     unreadNotifCount,
     orders,
     isAuthModalOpen,
@@ -117,55 +119,39 @@ const PrintPerfectAppContent: React.FC = () => {
     }
 
     const shopLinkMatch = window.location.pathname.match(/^\/(?:shopkeeper|shop|terminal|counter)\/([^/]+)\/?$/i);
-    if (shopLinkMatch && enterprises.length > 0) {
-      let shopCode: string;
-      try {
-        shopCode = decodeURIComponent(shopLinkMatch[1]);
-      } catch {
-        toast.error('This shop link contains an invalid code.');
-        return;
-      }
-      const normalizedShopCode = shopCode.toLowerCase();
-      const found = enterprises.find(
-        e =>
-          e.id.toLowerCase() === normalizedShopCode ||
-          e.terminalCode.toLowerCase() === normalizedShopCode ||
-          e.shortCode.toLowerCase() === normalizedShopCode
-      );
+    const shopParam = params.get('shop') || params.get('shopId') || params.get('terminal') || params.get('qr');
+    const shopCodeFromPath = shopLinkMatch?.[1];
+    const shopCode = shopCodeFromPath || shopParam;
+    if (!shopCode) return;
 
-      if (found) {
-        selectEnterprise(found.id);
-        setActiveTab('upload');
-        setCurrentView('upload');
-        toast.success(`Connected to ${found.name} via shop link!`);
-        window.history.replaceState({}, '', '/');
-      } else {
-        toast.error(`Shop code "${shopCode}" was not found.`);
-      }
+    const shopUrl = `${window.location.pathname}${window.location.search}`;
+    if (handledShopUrls.has(shopUrl)) return;
+    handledShopUrls.add(shopUrl);
+
+    let decodedShopCode: string;
+    try {
+      decodedShopCode = decodeURIComponent(shopCode);
+    } catch {
+      toast.error('This shop link contains an invalid code.');
       return;
     }
 
-    // Auto-connect shop via counter QR scan parameters (?shop=..., ?shopId=..., ?terminal=..., ?qr=...)
-    const shopParam = params.get('shop') || params.get('shopId') || params.get('terminal') || params.get('qr');
-    if (shopParam && enterprises.length > 0) {
-      const normalizedShopCode = shopParam.toLowerCase();
-      const found = enterprises.find(
-        e =>
-          e.id.toLowerCase() === normalizedShopCode ||
-          e.terminalCode.toLowerCase() === normalizedShopCode ||
-          e.shortCode.toLowerCase() === normalizedShopCode
-      );
-      if (found) {
-        selectEnterprise(found.id);
-        setActiveTab('upload');
-        setCurrentView('upload');
-        toast.success(`Connected to ${found.name} via QR scan!`);
-        window.history.replaceState({}, '', window.location.pathname);
-      } else {
-        toast.error(`Shop "${shopParam}" was not found.`);
+    void verifyAndSelectShopByCode(decodedShopCode).then(result => {
+      if (!result.success || !result.shop) {
+        toast.error(result.message || 'This shop code was not found.');
+        return;
       }
-    }
-  }, [orders, enterprises]);
+
+      setActiveTab('upload');
+      setCurrentView('upload');
+      toast.dismiss();
+      toast.success(`Connected to ${result.shop.name} via ${shopCodeFromPath ? 'shop link' : 'QR scan'}!`);
+      window.history.replaceState({}, '', '/');
+    }).catch(error => {
+      console.error('Unable to connect shop from URL:', error);
+      toast.error('Unable to verify this shop right now. Please try again.');
+    });
+  }, [orders, verifyAndSelectShopByCode]);
 
 
   // BottomNav tab change (Mobile)

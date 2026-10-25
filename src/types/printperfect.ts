@@ -59,6 +59,19 @@ export interface PrintEnterprise {
     colourDouble?: number;
     shopId?: string;
     isConfigured?: boolean;
+    bwPricingMode?: 'page' | 'print';
+    colorPricingMode?: 'page' | 'print';
+    shortPageLimit?: number;
+    bwShortPageRate?: number;
+    colorShortPageRate?: number;
+    eligibilitySettingsLoaded?: boolean;
+    eligibilitySettingsError?: boolean;
+    eligibility?: {
+      bwSingle?: boolean;
+      bwBackToBack?: boolean;
+      colorSingle?: boolean;
+      colorBackToBack?: boolean;
+    };
     bondPaperRate?: number;
     glossyPaperRate?: number;
     paperSizeRates?: Record<string, {
@@ -77,6 +90,12 @@ export interface PrintEnterprise {
       colorDoublePrice?: number;
       costonePrice?: number;
       costoneDoublePrice?: number;
+      eligibility?: {
+        bwSingle?: boolean;
+        bwBackToBack?: boolean;
+        colorSingle?: boolean;
+        colorBackToBack?: boolean;
+      };
     }>;
     costone: number;
     costoneDouble?: number;

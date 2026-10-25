@@ -35,8 +35,9 @@ export const TermsConditionsView: React.FC<TermsConditionsViewProps> = ({ onBack
     });
   }, []);
 
-  const handleToggleAccept = () => {
-    const next = !accepted;
+  const handleAcceptanceChange = (next: boolean) => {
+    if (next === accepted) return;
+
     setAccepted(next);
     localStorage.setItem('printon24_terms_accepted', next ? 'true' : 'false');
     saveUserConsent('guest', 'terms_conditions', next).catch(() => {});
@@ -180,7 +181,6 @@ export const TermsConditionsView: React.FC<TermsConditionsViewProps> = ({ onBack
         {/* Final Acceptance Checkbox Section (matching terms.jpeg requirement) */}
         <div className="pt-6 mt-6 border-t-2 border-slate-200 space-y-4">
           <div
-            onClick={handleToggleAccept}
             className={`flex items-start gap-3 p-4 rounded-2xl border transition-all cursor-pointer select-none ${
               accepted
                 ? 'bg-emerald-50/70 border-emerald-300 shadow-xs'
@@ -191,7 +191,7 @@ export const TermsConditionsView: React.FC<TermsConditionsViewProps> = ({ onBack
               type="checkbox"
               id="terms_agree_checkbox"
               checked={accepted}
-              onChange={handleToggleAccept}
+              onChange={event => handleAcceptanceChange(event.target.checked)}
               className="mt-0.5 w-4 h-4 text-[#FF1300] rounded border-slate-300 focus:ring-[#FF1300] cursor-pointer"
             />
             <label
@@ -208,7 +208,7 @@ export const TermsConditionsView: React.FC<TermsConditionsViewProps> = ({ onBack
             </span>
             <button
               type="button"
-              onClick={handleToggleAccept}
+              onClick={() => handleAcceptanceChange(true)}
               className={`px-5 py-2 rounded-xl text-xs font-bold transition-all ${
                 accepted
                   ? 'bg-emerald-600 text-white shadow-xs'
