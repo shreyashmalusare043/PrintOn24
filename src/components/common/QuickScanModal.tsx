@@ -44,7 +44,7 @@ export const QuickScanModal: React.FC<QuickScanModalProps> = ({
     e.preventDefault();
     const code = manualCode.trim();
     if (!code) {
-      toast.error('Please enter a shop terminal code (e.g. PUNE-HE-01)');
+      toast.error('Please enter a shop terminal code.');
       return;
     }
     const res = await verifyAndSelectShopByCode(code);
@@ -54,7 +54,7 @@ export const QuickScanModal: React.FC<QuickScanModalProps> = ({
       onClose();
       setManualCode('');
     } else {
-      toast.error(res.message || 'Invalid shop code. Please enter a valid partner code (e.g. PUNE-HE-01).');
+      toast.error(res.message || 'Invalid shop code. Please enter a valid partner code.');
     }
   };
 
@@ -154,7 +154,7 @@ export const QuickScanModal: React.FC<QuickScanModalProps> = ({
               type="text"
               value={manualCode}
               onChange={e => setManualCode(e.target.value)}
-              placeholder="e.g. PUNE-HE-01"
+              placeholder="Enter shop code"
               className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 uppercase font-mono font-bold"
             />
             <button

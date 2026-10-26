@@ -158,7 +158,7 @@ export const ScanView: React.FC<ScanViewProps> = ({ onProceedToUpload }) => {
       const clean = decodedText.trim();
       if (!clean) return;
 
-      // Extract shop code if encoded as URL e.g. https://www.printon24.in/shop/PUNE-HE-01 or printon24:PUNE-HE-01
+      // Extract a shop code if encoded in a shop URL or prefixed QR value.
       let targetCode = clean;
       const urlMatch = clean.match(/(?:shopkeeper|shop|terminal|counter)\/([A-Za-z0-9_-]+)/i);
       if (urlMatch && urlMatch[1]) {
@@ -180,11 +180,7 @@ export const ScanView: React.FC<ScanViewProps> = ({ onProceedToUpload }) => {
         stopCameraStream();
         setIsDetected(true);
         toast.success(`QR Scanned: Connected to ${shop.name} (${shop.terminalCode})!`);
-        setTimeout(() => {
-          window.location.assign(
-            `https://www.printon24.in/shopkeeper/${encodeURIComponent(shop.terminalCode)}`
-          );
-        }, 500);
+        onProceedToUpload();
       } else {
         toast.error(
           res.message || `Scanned code "${targetCode}" is not a registered shop. Please try again.`
@@ -357,18 +353,7 @@ export const ScanView: React.FC<ScanViewProps> = ({ onProceedToUpload }) => {
           if (qrResult && qrResult.data) {
             handleDecodedValue(qrResult.data);
           } else {
-            // If QR wasn't decoded directly from pixels, attempt pairing with default registered terminal
-            const fallbackCode = enterprises[0]?.terminalCode || 'PUNE-HE-01';
-            const res = await verifyAndSelectShopByCode(fallbackCode);
-            if (res.success && res.shop) {
-              playScanChime();
-              toast.success(`Matched QR from "${file.name}"! Connected to ${res.shop.name}`);
-              setTimeout(() => {
-                onProceedToUpload();
-              }, 500);
-            } else {
-              toast.error('No readable QR code found in selected image. Please try another photo.');
-            }
+            toast.error('No readable QR code found in selected image. Please try another photo.');
           }
         } else {
           URL.revokeObjectURL(objectUrl);
@@ -400,7 +385,7 @@ export const ScanView: React.FC<ScanViewProps> = ({ onProceedToUpload }) => {
     setErrorMessage('');
     const code = manualCode.trim();
     if (!code) {
-      setErrorMessage('Please enter a shop scan / terminal code (e.g. PUNE-HE-01)');
+      setErrorMessage('Please enter a shop scan / terminal code.');
       return;
     }
 
@@ -419,7 +404,7 @@ export const ScanView: React.FC<ScanViewProps> = ({ onProceedToUpload }) => {
       }, 500);
     } else {
       setErrorMessage(
-        res.message || `Invalid shop code "${code}". Please enter a valid registered counter code (e.g. PUNE-HE-01).`
+        res.message || `Invalid shop code "${code}". Please enter a valid registered counter code.`
       );
       toast.error('Invalid Shop Unique Code');
     }
@@ -597,7 +582,7 @@ export const ScanView: React.FC<ScanViewProps> = ({ onProceedToUpload }) => {
             <Tag className="w-3.5 h-3.5 text-slate-400" />
           </h3>
           <p className="text-[11px] text-slate-500">
-            Type the terminal code or shop name (e.g. <span className="font-mono font-bold text-[#FF1300]">PUNE-HE-01</span> or <span className="font-semibold text-slate-700">Hitesh</span>)
+            Type the terminal code or shop name printed by your shop.
           </p>
         </div>
 
@@ -630,7 +615,7 @@ export const ScanView: React.FC<ScanViewProps> = ({ onProceedToUpload }) => {
                   setShowSuggestions(true);
                 }}
                 onFocus={() => setShowSuggestions(true)}
-                placeholder="Shop code or name (e.g. Hitesh)"
+                placeholder="Shop code or name"
                 className="w-full h-10 bg-slate-50 border border-red-200/90 rounded-xl px-3 text-xs text-slate-900 font-mono font-bold tracking-wider placeholder:tracking-normal placeholder:font-normal placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#FF1300]/25 focus:border-[#FF1300] uppercase"
               />
             </div>
@@ -913,7 +898,7 @@ export const ScanView: React.FC<ScanViewProps> = ({ onProceedToUpload }) => {
                 type="text"
                 value={directorySearch}
                 onChange={e => setDirectorySearch(e.target.value)}
-                placeholder="Search shopkeepers by name, code (e.g. PUNE-HE-01), or area..."
+                placeholder="Search shopkeepers by name, code, or area..."
                 className="w-full h-10 pl-10 pr-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#FF1300]/20 focus:border-[#FF1300]"
               />
               {directorySearch && (

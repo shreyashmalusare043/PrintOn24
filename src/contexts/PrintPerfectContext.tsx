@@ -53,6 +53,32 @@ import {
 } from '../services/api';
 import { getPdfPageCount } from '../utils/pdfPageCount';
 import { isPrintModeEligible } from '../lib/printEligibility';
+import { getShopInitials } from '../utils/shopInitials';
+
+const UNSELECTED_ENTERPRISE: PrintEnterprise = {
+  id: '',
+  name: 'Select a shop',
+  shortCode: '',
+  badgeColor: '#FF1300',
+  badgeTextColor: '#FFFFFF',
+  verified: false,
+  category: '',
+  address: '',
+  phone: '',
+  rating: 0,
+  totalOrders: 0,
+  terminalCode: '',
+  initials: '',
+  pricing: {
+    blackAndWhite: 0,
+    colour: 0,
+    costone: 0,
+    bondPaperExtra: 0,
+    glossyPaperExtra: 0,
+    a3Multiplier: 1,
+    a2Multiplier: 1
+  }
+};
 
 interface PriceCalculation {
   effectivePages: number;
@@ -577,18 +603,22 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
               };
             } else {
               merged.push({
-                ...merged[0],
+                ...UNSELECTED_ENTERPRISE,
                 id: rs.id,
                 name: rs.name,
+                shortCode: getShopInitials(rs.name),
                 address: rs.address,
+                phone: rs.phone,
                 terminalCode: rs.terminalCode,
                 latitude: rs.latitude,
                 longitude: rs.longitude,
                 rating: rs.rating,
+                totalOrders: rs.totalReviews,
                 logoUrl: rs.logoUrl || '',
                 membershipEnabled: rs.membershipEnabled,
                 membershipPrice: rs.membershipPrice,
-                pricing: rs.pricing || merged[0].pricing
+                initials: getShopInitials(rs.name),
+                pricing: rs.pricing || UNSELECTED_ENTERPRISE.pricing
               });
             }
           });
@@ -733,7 +763,9 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
     selectedEnterpriseId && enterprises.some(e => e.id === selectedEnterpriseId)
   );
 
-  const selectedEnterprise = (selectedEnterpriseId && enterprises.find(e => e.id === selectedEnterpriseId)) || enterprises[0];
+  const selectedEnterprise =
+    (selectedEnterpriseId && enterprises.find(e => e.id === selectedEnterpriseId)) ||
+    UNSELECTED_ENTERPRISE;
 
   useEffect(() => {
     if (!selectedEnterpriseId) return;
@@ -2877,7 +2909,7 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
       toast.success(`Paired with terminal ${matched.terminalCode} (${matched.name})! Ready to print.`);
       return true;
     }
-    toast.error('Terminal code not recognized. Please scan a valid printOn24 terminal (e.g. PUNE-HE-01).');
+    toast.error('Terminal code not recognized. Please scan a valid printOn24 terminal.');
     return false;
   };
 
@@ -2897,7 +2929,7 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
       toast.success(`Linked Shop: ${matched.name} (${matched.terminalCode})! Print preferences loaded.`);
       return true;
     }
-    toast.error(`No printOn24 terminal found for code "${code}". Please check the shop counter stand (e.g. PUNE-HE-01) or scan the QR code.`);
+    toast.error(`No printOn24 terminal found for code "${code}". Please check the shop counter stand or scan its QR code.`);
     return false;
   };
 
@@ -2905,7 +2937,7 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
     rawCode: string
   ): Promise<{ success: boolean; shop?: PrintEnterprise; message?: string }> => {
     if (!rawCode || !rawCode.trim()) {
-      return { success: false, message: 'Please enter a shop terminal code (e.g. PUNE-HE-01).' };
+      return { success: false, message: 'Please enter a shop terminal code.' };
     }
     const clean = rawCode.trim().replace(/^COPYGO:/i, '').replace(/^SHOP:/i, '').toLowerCase();
 
@@ -2984,7 +3016,7 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
     return {
       success: false,
-      message: `Invalid shop code "${rawCode.trim()}". Please enter a valid partner counter code (e.g. PUNE-HE-01).`
+      message: `Invalid shop code "${rawCode.trim()}". Please enter a valid partner counter code.`
     };
   };
 

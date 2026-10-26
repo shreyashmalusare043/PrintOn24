@@ -6,8 +6,8 @@
  * - "Z Book Point" -> "ZBP"
  * - "ABC Print Shop" -> "APS"
  * - "Royal Xerox" -> "RX"
- * - "Hitesh Enterprises" -> "HE"
- * - "Hitesh" -> "HI" (single-word fallback)
+ * - "Campus Print Center" -> "CPC"
+ * - "Campus" -> "C" (single-word fallback)
  */
 export function getShopInitials(name?: string | null): string {
   if (!name || typeof name !== 'string') return 'PO';

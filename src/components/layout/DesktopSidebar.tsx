@@ -243,7 +243,7 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
           </div>
           <button
             type="button"
-            onClick={() => onNavigate('start_business')}
+            onClick={() => window.location.assign('https://partner.printon24.in/enquiry')}
             className="mt-3 w-full py-1.5 px-3 rounded-full bg-[#FF1300] hover:bg-[#E01100] active:scale-95 text-white text-[11px] font-bold flex items-center justify-center gap-1 shadow-sm transition-transform font-heading"
           >
             <span>Get Started</span>

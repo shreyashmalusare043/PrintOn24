@@ -80,7 +80,7 @@ export const DrawerContentModal: React.FC<DrawerContentModalProps> = ({
                 p
               </div>
               <h3 className="text-base font-extrabold text-slate-900">Print · Scan · Grow</h3>
-              <p className="text-slate-400 text-[11px]">printOn24 Network v2.4.0</p>
+              <p className="text-slate-400 text-[11px]">printOn24 Network v1.0.0</p>
             </div>
             <p>
               printOn24 is India’s foremost campus & hyper-local digital printing ecosystem. We connect university students, researchers, coaching centers, and working professionals with 2,000+ local Xerox and industrial printing hubs.

@@ -17,7 +17,7 @@ export function getPrintModeEligibility(
   const eligible = (
     globalValue: boolean | undefined,
     paperValue: boolean | undefined
-  ) => globalValue === true && (!paper || paperValue === true);
+  ) => globalValue === true && (!paper || paperValue !== false);
 
   return {
     'Black & White': {

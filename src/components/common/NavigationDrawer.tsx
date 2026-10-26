@@ -223,6 +223,9 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
               );
             })}
           </div>
+          <p className="border-t border-slate-100 px-3 pt-3 text-center text-[10px] font-medium text-slate-400">
+            Version v1.0.0
+          </p>
         </div>
       </SheetContent>
     </Sheet>

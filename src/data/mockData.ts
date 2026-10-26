@@ -36,35 +36,7 @@ export const INITIAL_USER: UserProfile = {
   isAuthenticated: false
 };
 
-export const INITIAL_ENTERPRISES: PrintEnterprise[] = [
-  {
-    id: 'shop_1790975335119',
-    name: 'Hitesh Enterprises',
-    shortCode: 'HE',
-    badgeColor: '#FF1300',
-    badgeTextColor: '#FFFFFF',
-    verified: true,
-    category: 'Digital Printing & Xerox Center',
-    address: 'Kothrud, Pune, Maharashtra',
-    phone: '+91 98220 11223',
-    rating: 4.9,
-    totalOrders: 0,
-    terminalCode: 'PUNE-HE-01',
-    initials: 'HE',
-    latitude: 18.5204,
-    longitude: 73.8567,
-    logoUrl: '',
-    pricing: {
-      blackAndWhite: 2.0,
-      colour: 5.0,
-      costone: 3.5,
-      bondPaperExtra: 1.5,
-      glossyPaperExtra: 3.0,
-      a3Multiplier: 1.8,
-      a2Multiplier: 3.2
-    }
-  }
-];
+export const INITIAL_ENTERPRISES: PrintEnterprise[] = [];
 
 export const INITIAL_MEMBERSHIPS: MembershipPlan[] = [];
 
@@ -248,4 +220,3 @@ export const INITIAL_NEARBY_SHOPS = [
     }
   }
 ];
-
