@@ -1,15 +1,23 @@
 {
   "name": "Print on 24",
-  "short_name": "Print on 24",
+  "short_name": "PrintOn24",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#dc2626",
   "icons": [
     {
-      "src": "/favicon.png",
-      "sizes": "96x96",
-      "type": "image/png"
+      "src": "/icons/printon24-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/printon24-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
     }
   ]
 }

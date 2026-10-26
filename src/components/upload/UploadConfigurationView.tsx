@@ -51,6 +51,12 @@ interface UploadConfigurationViewProps {
 export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = ({
   onProceedToCheckout
 }) => {
+  const neutralSuccessToastStyle: React.CSSProperties = {
+    background: '#fff',
+    color: '#111827',
+    border: '1px solid #e5e7eb'
+  };
+
   const {
     user,
     updateUser,
@@ -367,17 +373,7 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
 
     // DOC / DOCX: detect page count and default to Portrait
     if (file.name.match(/\.docx?$/i) || file.type.includes('word')) {
-      let pages = 1;
-      try {
-        const buffer = await file.arrayBuffer();
-        const text = new TextDecoder('latin1').decode(buffer);
-        const pageMatch = text.match(/<Pages>(\d+)<\/Pages>/);
-        if (pageMatch && pageMatch[1]) {
-          const parsed = parseInt(pageMatch[1], 10);
-          if (!isNaN(parsed) && parsed > 0) pages = parsed;
-        }
-      } catch {}
-      return { pages, orientation: 'Portrait' };
+      return { pages: 1, orientation: 'Portrait' };
     }
 
     // Excel defaults to Landscape
@@ -413,13 +409,15 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
           totalPages: detectedInfo.pages,
           imageUrl: detectedInfo.imageUrl,
           orientation: detectedInfo.orientation
-        } as any);
+        });
 
         clearInterval(ticker);
 
         setUploadProgress(100);
         setUploadStatus('completed');
-        toast.success(`'${file.name}' uploaded successfully!`);
+        toast.success(`'${file.name}' uploaded successfully!`, {
+          style: neutralSuccessToastStyle
+        });
 
         // Requirement 19: For JPG/JPEG/PNG, open A4 Canvas Editor by default
         if (file.type.startsWith('image/') || /\.(jpe?g|png|webp)$/i.test(file.name)) {
@@ -456,13 +454,15 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
             totalPages: detected.pages,
             imageUrl: detected.imageUrl,
             orientation: detected.orientation
-          } as any);
+          });
         }
 
         clearInterval(multiTicker);
         setUploadProgress(100);
         setUploadStatus('completed');
-        toast.success(`${fileList.length} files securely uploaded to print queue!`);
+        toast.success(`${fileList.length} files uploaded successfully!`, {
+          style: neutralSuccessToastStyle
+        });
         setTimeout(() => {
           setUploadStatus('idle');
           setUploadProgress(null);
@@ -513,7 +513,9 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
     }
 
     if (!customerName || !customerName.trim()) {
-      toast.error('Please enter your name to proceed with your print order.');
+      toast.error('Please Enter Your Name!', {
+        style: neutralSuccessToastStyle
+      });
       return;
     }
     // Update user name for the order (for guests, updateUser stores strictly in sessionStorage without syncing to DB)
@@ -851,6 +853,8 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                 <p className="text-[10px] text-slate-400">
                   {uploadStatus === 'completed'
                     ? 'All documents parsed & saved to database print queue!'
+                    : uploadProgress >= 92
+                    ? 'Finalizing your document and preparing it for printing...'
                     : 'Uploading, inspecting page formats & caching layout...'}
                 </p>
               </div>
@@ -1063,13 +1067,15 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                                 : ids.filter(id => id !== doc.id)
                             );
                           }}
-                          className="col-start-2 row-start-1 -translate-y-1 h-4 w-4 shrink-0 cursor-pointer accent-[#FF1300]"
+                          className="col-start-2 row-start-1 -translate-y-1.5 h-4 w-4 shrink-0 cursor-pointer accent-[#FF1300]"
                         />
                         <button
                           type="button"
                           onClick={() => {
                             removeUploadedDoc(doc.id);
-                            toast.success(`Removed "${doc.fileName}" from print queue`);
+                            toast.success(`"${doc.fileName}" deleted successfully!`, {
+                              style: neutralSuccessToastStyle
+                            });
                           }}
                           className="col-start-2 row-start-2 flex h-8 w-8 items-center justify-center rounded-full bg-red-50 text-[#FF1300] transition-colors hover:bg-red-100 sm:h-9 sm:w-9"
                           title="Delete File from Queue"
@@ -1282,7 +1288,8 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
             </div>
           )}
 
-          {/* 4.1 Print Side: Single Side | Back to Back (Button format on single row with tooltip on Custom Range) */}
+          <div className="flex flex-col-reverse gap-2.5">
+          {/* 4.2 Print Side: Single Side | Back to Back (Button format on single row with tooltip on Custom Range) */}
           <div className="relative group">
             <div
               onClickCapture={handleDisabledGlobalControlClick('side')}
@@ -1357,7 +1364,7 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
             )}
           </div>
 
-          {/* 4.2 Print Type: Color | Black & White (Button format on single row with tooltip on Custom Range) */}
+          {/* 4.1 Print Type: Color | Black & White (Button format on single row with tooltip on Custom Range) */}
           <div className="relative group">
             <div
               onClickCapture={handleDisabledGlobalControlClick('type')}
@@ -1446,6 +1453,8 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                 <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 border-4 border-transparent border-t-slate-900" />
               </div>
             )}
+          </div>
+
           </div>
 
           {/* 4.3 Copies: Minus (-) Button | Quantity Input Box (manual typing) | Plus (+) Button */}

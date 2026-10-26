@@ -51,7 +51,7 @@ import {
   fetchGuestProfileImage,
   submitShopReview
 } from '../services/api';
-import { getPdfPageCount } from '../utils/pdfPageCount';
+import { getPdfPageCount, getPdfPageInfo } from '../utils/pdfPageCount';
 import { isPrintModeEligible } from '../lib/printEligibility';
 import { getShopInitials } from '../utils/shopInitials';
 
@@ -384,7 +384,11 @@ interface PrintPerfectContextType {
   currentDoc: UploadedDoc | null;
   setCurrentDoc: (doc: UploadedDoc | null) => void;
   selectDocument: (docId: string) => void;
-  uploadNewDoc: (file: File, customData?: { totalPages?: number; imageUrl?: string }) => void;
+  uploadNewDoc: (file: File, customData?: {
+    totalPages?: number;
+    imageUrl?: string;
+    orientation?: 'Portrait' | 'Landscape';
+  }) => void;
   uploadMultipleDocs: (files: FileList | File[]) => void;
   removeCurrentDoc: () => void;
   removeUploadedDoc: (docId: string) => void;
@@ -964,7 +968,11 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const [uploadedDocs, setUploadedDocs] = useState<UploadedDoc[]>([]);
   const [currentDoc, setCurrentDoc] = useState<UploadedDoc | null>(null);
 
-  const uploadNewDoc = async (file: File, customData?: { totalPages?: number; imageUrl?: string }): Promise<UploadedDoc | null> => {
+  const uploadNewDoc = async (file: File, customData?: {
+    totalPages?: number;
+    imageUrl?: string;
+    orientation?: 'Portrait' | 'Landscape';
+  }): Promise<UploadedDoc | null> => {
     // 1. File Validation
     if (!file) {
       toast.error('No file selected.');
@@ -1062,18 +1070,9 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
     if (validExt === 'PDF' || file.type === 'application/pdf') {
       try {
         const buffer = await file.arrayBuffer();
-        calculatedPages = await getPdfPageCount(new Uint8Array(buffer));
-        const text = new TextDecoder('latin1').decode(buffer);
-
-        // Detect PDF orientation from MediaBox or CropBox
-        const boxMatches = text.match(/\/(?:MediaBox|CropBox)\s*\[\s*([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s*\]/);
-        if (boxMatches) {
-          const w = Math.abs(parseFloat(boxMatches[3]) - parseFloat(boxMatches[1]));
-          const h = Math.abs(parseFloat(boxMatches[4]) - parseFloat(boxMatches[2]));
-          if (w > h) {
-            detectedLayout = 'Landscape';
-          }
-        }
+        const pdfInfo = await getPdfPageInfo(new Uint8Array(buffer));
+        calculatedPages = pdfInfo.pages;
+        detectedLayout = pdfInfo.orientation;
       } catch (pdfErr) {
         console.error('Failed to read PDF page count:', pdfErr);
         pdfPageCountFailed = true;
@@ -1084,18 +1083,20 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
     // Detect slide count & orientation for PowerPoint files
     if (validExt === 'PPT' || validExt === 'PPTX' || file.name.match(/\.pptx?$/i) || file.type.includes('presentation')) {
       detectedLayout = 'Landscape';
-      try {
-        const buffer = await file.arrayBuffer();
-        const text = new TextDecoder('latin1').decode(buffer);
-        const slideMatches = text.match(/ppt\/slides\/slide\d+\.xml/g);
-        if (slideMatches && slideMatches.length > 0) {
-          const uniqueSlides = new Set(slideMatches).size;
-          if (uniqueSlides > 0) {
-            calculatedPages = uniqueSlides;
+      if (customData?.totalPages === undefined) {
+        try {
+          const buffer = await file.arrayBuffer();
+          const text = new TextDecoder('latin1').decode(buffer);
+          const slideMatches = text.match(/ppt\/slides\/slide\d+\.xml/g);
+          if (slideMatches && slideMatches.length > 0) {
+            const uniqueSlides = new Set(slideMatches).size;
+            if (uniqueSlides > 0) {
+              calculatedPages = uniqueSlides;
+            }
           }
+        } catch (pptErr) {
+          console.warn('PPT slide count detection note:', pptErr);
         }
-      } catch (pptErr) {
-        console.warn('PPT slide count detection note:', pptErr);
       }
     }
 
@@ -1121,8 +1122,8 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
       } catch {}
     }
 
-    if ((customData as any)?.orientation) {
-      detectedLayout = (customData as any).orientation;
+    if (customData?.orientation) {
+      detectedLayout = customData.orientation;
     }
 
     let finalPreviewUrl = publicStorageUrl;
@@ -1141,7 +1142,6 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
       calculatedPages = 0;
       try {
         const inspection = await convertDocumentViaBackend({
-          file,
           fileUrl: publicStorageUrl,
           fileName: file.name,
           fileType: validExt,
@@ -1169,7 +1169,6 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
       try {
         conversionStatus = 'converting';
         const convResult = await convertDocumentViaBackend({
-          file,
           fileUrl: publicStorageUrl,
           fileName: file.name,
           fileType: validExt,
@@ -1185,11 +1184,6 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
             throw new Error('The document converter did not return a valid page count.');
           }
           calculatedPages = convertedPageCount;
-          try {
-            calculatedPages = await getPdfPageCount(convResult.pdfUrl);
-          } catch (previewCountError) {
-            console.warn('Could not read converted PDF page count in browser; using the converter count:', previewCountError);
-          }
           convertedPdfUrl = convResult.pdfUrl;
           finalPreviewUrl = convResult.pdfUrl;
           isConverted = true;
@@ -1305,7 +1299,6 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
       console.warn('Supabase document DB sync skipped:', e);
     }
 
-    toast.success(`'${file.name}' securely uploaded (Available for print for 12 hours)`);
     return newDoc;
   };
 
@@ -1355,7 +1348,6 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
       }
       return filtered;
     });
-    toast.info('Document deleted successfully');
   };
 
   const updateDocEditing = (docId: string, editing: ImageEditingState) => {

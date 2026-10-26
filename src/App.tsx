@@ -14,7 +14,7 @@ const App: React.FC = () => {
     return (
       <PrintPerfectProvider>
         <ChromePdfPreviewView />
-        <Toaster position="top-center" richColors />
+        <Toaster position="top-center" />
       </PrintPerfectProvider>
     );
   }
@@ -22,7 +22,7 @@ const App: React.FC = () => {
   return (
     <PrintPerfectProvider>
       <PrintPerfectApp />
-      <Toaster position="top-center" richColors />
+      <Toaster position="top-center" />
     </PrintPerfectProvider>
   );
 };
