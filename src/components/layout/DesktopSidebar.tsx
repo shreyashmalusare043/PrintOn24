@@ -4,6 +4,7 @@ import {
   Bell,
   Briefcase,
   ChevronRight,
+  CircleHelp,
   Crown,
   FileText,
   Home,
@@ -28,6 +29,7 @@ export type DesktopNavView =
   | 'memberships'
   | 'reports'
   | 'notifications'
+  | 'how_to_use'
   | 'about_us'
   | 'privacy_policy'
   | 'terms_conditions'
@@ -72,7 +74,8 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
       icon: Bell,
       hasChevron: false,
       badge: unreadNotifCount > 0 ? unreadNotifCount : undefined
-    }
+    },
+    { id: 'how_to_use', label: 'How To Use?', icon: CircleHelp, hasChevron: false }
   ];
 
   const secondaryNavItems = [

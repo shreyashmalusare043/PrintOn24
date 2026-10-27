@@ -1,22 +1,30 @@
-import React, { useState } from 'react';
+import { Capacitor } from '@capacitor/core';
 import {
-  Settings,
+  AlertCircle,
   Bell,
-  ShieldCheck,
-  KeyRound,
-  Lock,
+  Camera,
+  CheckCircle2,
+  Cookie,
   Eye,
   EyeOff,
-  CheckCircle2,
   FileCheck,
-  Cookie,
-  AlertCircle,
-  Mail
+  KeyRound,
+  Lock,
+  Mail,
+  MapPin,
+  Settings,
+  ShieldCheck
 } from 'lucide-react';
-import { usePrintPerfect } from '../../contexts/PrintPerfectContext';
+import React, { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { updateNotificationPreference, saveUserConsent } from '../../services/api';
+import { usePrintPerfect } from '../../contexts/PrintPerfectContext';
 import { supabase } from '../../db/supabase';
+import {
+  type AndroidPermissionName,
+  type AndroidPermissionStatuses,
+  AppPermissions
+} from '../../native/appPermissions';
+import { saveUserConsent, updateNotificationPreference } from '../../services/api';
 
 interface SettingsPreferencesViewProps {
   onBackToHome: () => void;
@@ -24,6 +32,62 @@ interface SettingsPreferencesViewProps {
 
 export const SettingsPreferencesView: React.FC<SettingsPreferencesViewProps> = ({ onBackToHome }) => {
   const { user } = usePrintPerfect();
+  const isAndroidApp = Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android';
+  const [androidPermissionStatuses, setAndroidPermissionStatuses] = useState<AndroidPermissionStatuses | null>(null);
+  const [updatingAndroidPermission, setUpdatingAndroidPermission] = useState<AndroidPermissionName | 'settings' | null>(null);
+
+  const refreshAndroidPermissionStatuses = useCallback(async () => {
+    try {
+      const statuses = await AppPermissions.getPermissionStatuses();
+      setAndroidPermissionStatuses(statuses);
+    } catch (error) {
+      console.error('Could not read Android permission statuses:', error);
+      toast.error('Could not check Android permissions. Please try again.');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isAndroidApp) return;
+
+    void refreshAndroidPermissionStatuses();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void refreshAndroidPermissionStatuses();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [isAndroidApp, refreshAndroidPermissionStatuses]);
+
+  const requestAndroidPermission = async (permission: AndroidPermissionName) => {
+    setUpdatingAndroidPermission(permission);
+    try {
+      const statuses = await AppPermissions.requestPermission({ permission });
+      setAndroidPermissionStatuses(statuses);
+      if (statuses[permission] === 'granted') {
+        toast.success(`${permission === 'camera' ? 'Camera' : permission === 'location' ? 'Location' : 'Notifications'} permission allowed.`);
+      } else {
+        toast.info('Permission not allowed. You can change it in Android Settings.');
+      }
+    } catch (error) {
+      console.error(`Could not request Android ${permission} permission:`, error);
+      toast.error('Could not request this permission. Open Android Settings to manage it.');
+    } finally {
+      setUpdatingAndroidPermission(null);
+    }
+  };
+
+  const openAndroidPermissionSettings = async () => {
+    setUpdatingAndroidPermission('settings');
+    try {
+      await AppPermissions.openAppSettings();
+    } catch (error) {
+      console.error('Could not open Android app settings:', error);
+      toast.error('Could not open Android permission settings.');
+    } finally {
+      setUpdatingAndroidPermission(null);
+    }
+  };
 
   // 1. Single Notifications On/Off Toggle
   const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(() => {
@@ -248,6 +312,77 @@ export const SettingsPreferencesView: React.FC<SettingsPreferencesViewProps> = (
           <span className="text-slate-400">Database synchronized</span>
         </div>
       </div>
+
+      {isAndroidApp && (
+        <div className="bg-white rounded-3xl p-5 border border-slate-200/90 shadow-xs space-y-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-red-50 text-[#FF1300] flex items-center justify-center">
+              <ShieldCheck className="w-5 h-5 stroke-[2.2]" />
+            </div>
+            <div>
+              <h2 className="text-sm font-bold text-slate-900 font-heading">Android App Permissions</h2>
+              <p className="text-[11px] text-slate-500">Allow access for scanning, nearby shops, and alerts.</p>
+            </div>
+          </div>
+
+          <div className="divide-y divide-slate-100">
+            {([
+              { id: 'camera', label: 'Camera', description: 'Scan a PrintHub QR code.', icon: Camera },
+              { id: 'location', label: 'Location', description: 'Find nearby print shops.', icon: MapPin },
+              { id: 'notifications', label: 'Notifications', description: 'Receive Android notifications.', icon: Bell }
+            ] as const).map(permission => {
+              const status = androidPermissionStatuses?.[permission.id];
+              const isGranted = status === 'granted';
+              const isDenied = status === 'denied';
+              const Icon = permission.icon;
+              return (
+                <div key={permission.id} className="flex items-center justify-between gap-3 py-3 first:pt-1 last:pb-1">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <Icon className="w-4 h-4 shrink-0 text-slate-500" />
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-slate-900">{permission.label}</p>
+                      <p className="text-[10px] text-slate-500">{permission.description}</p>
+                      <p className={`text-[10px] font-semibold ${isGranted ? 'text-emerald-700' : 'text-amber-700'}`}>
+                        {isGranted ? 'Allowed' : isDenied ? 'Not allowed' : status ? 'Not requested' : 'Checking...'}
+                      </p>
+                    </div>
+                  </div>
+                  {!isGranted && (
+                    <button
+                      type="button"
+                      onClick={() => isDenied
+                        ? void openAndroidPermissionSettings()
+                        : void requestAndroidPermission(permission.id)}
+                      disabled={!status || updatingAndroidPermission !== null}
+                      className="shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-[10px] font-bold text-slate-800 hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      {updatingAndroidPermission === permission.id || updatingAndroidPermission === 'settings'
+                        ? 'Opening...'
+                        : isDenied ? 'Open Settings' : 'Allow'}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <p className="text-[11px] font-bold text-slate-800">Shared documents</p>
+            <p className="mt-0.5 text-[10px] text-slate-600">
+              PDF, DOC, and DOCX files shared from WhatsApp use Android&apos;s secure share access. Storage permission is not needed.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => void openAndroidPermissionSettings()}
+            disabled={updatingAndroidPermission !== null}
+            className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-bold text-slate-800 hover:bg-slate-50 disabled:opacity-50"
+          >
+            {updatingAndroidPermission === 'settings' ? 'Opening Android Settings...' : 'Manage Permissions in Android Settings'}
+          </button>
+        </div>
+      )}
 
       {/* 2. Password Management & Security Section */}
       <div className="bg-white rounded-3xl p-5 border border-slate-200/90 shadow-xs space-y-4">

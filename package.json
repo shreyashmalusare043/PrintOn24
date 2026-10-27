@@ -6,9 +6,15 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "android:sync": "pnpm build && cap sync android",
+    "android:open": "cap open android",
     "lint": "tsgo -p tsconfig.check.json; npx biome lint; .rules/check.sh;npx tailwindcss -i ./src/index.css -o /dev/null 2>&1 | grep -E '^(CssSyntaxError|Error):.*' || true;.rules/testBuild.sh"
   },
   "dependencies": {
+    "@capacitor/android": "^7.6.9",
+    "@capacitor/app": "^7.1.2",
+    "@capacitor/browser": "^7.0.5",
+    "@capacitor/core": "^7.6.9",
     "@hookform/resolvers": "^5.2.2",
     "@radix-ui/react-accordion": "^1.2.12",
     "@radix-ui/react-alert-dialog": "^1.1.15",
@@ -79,6 +85,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.5",
+    "@capacitor/cli": "^7.6.9",
     "@tailwindcss/container-queries": "^0.1.1",
     "@testing-library/jest-dom": "^6.10.0",
     "@testing-library/react": "^16.3.2",

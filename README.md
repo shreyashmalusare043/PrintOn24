@@ -41,6 +41,14 @@ PrintOn24 Application Link URL
 
 Vite, TypeScript, React, Supabase
 
+## Android Studio
+
+The native Android project is in `android/`. After changing the web app, run `pnpm run android:sync` from the project root to build the web assets and copy them into Android. Then open the `android/` folder in Android Studio and use **Build > Build APK(s)**. The debug APK is generated at `android/app/build/outputs/apk/debug/app-debug.apk`.
+
+The Android app accepts shared PDF, DOC, DOCX, JPG, PNG, and WEBP files. When a shared file opens PrintOn24, select a PrintHub by name or shop code; the app then uploads the file and continues to print configuration. Android camera, location, and notification permissions can be requested from **Settings & Preferences** or managed in Android app settings. Shared files use Android's secure share access and do not require broad storage permission.
+
+For Google sign-in in the Android app, add `com.printon24.app://auth/callback` to the Supabase project's **Authentication > URL Configuration > Redirect URLs** allowlist. Web sign-in continues to use the current website URL.
+
 ## Development Guidelines
 
 ### How to edit code locally?

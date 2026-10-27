@@ -1,27 +1,28 @@
-import React from 'react';
 import {
-  X,
-  Printer,
-  Receipt,
-  Crown,
   BarChart3,
   Bell,
-  Info,
-  ShieldCheck,
-  FileText,
-  Settings,
   Briefcase,
-  MessageSquare,
-  Megaphone,
-  Phone,
   ChevronRight,
-  Store,
+  CircleHelp,
+  Crown,
+  ExternalLink,
+  FileText,
+  Info,
+  Megaphone,
+  MessageSquare,
+  Phone,
+  Printer,
+  Receipt,
+  Settings,
+  ShieldCheck,
   Sparkles,
-  ExternalLink
+  Store,
+  X
 } from 'lucide-react';
-import { Sheet, SheetContent } from '../ui/sheet';
+import React from 'react';
 import { usePrintPerfect } from '../../contexts/PrintPerfectContext';
 import { DEFAULT_GUEST_PROFILE_PHOTO } from '../../types/printperfect';
+import { Sheet, SheetContent } from '../ui/sheet';
 
 interface NavigationDrawerProps {
   isOpen: boolean;
@@ -47,7 +48,8 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
       icon: Bell,
       desc: 'Order updates & alerts',
       badge: unreadNotifCount > 0 ? unreadNotifCount : undefined
-    }
+    },
+    { id: 'how_to_use', label: 'How To Use?', icon: CircleHelp, desc: 'App download and sharing guide' }
   ];
 
   const secondaryItems = [

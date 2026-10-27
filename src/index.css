@@ -92,6 +92,10 @@ All colors MUST be HSL.
     min-height: 100vh;
   }
 
+  .native-app-shell {
+    padding-top: max(24px, env(safe-area-inset-top, 0px));
+  }
+
   h1, h2, h3, h4, h5, h6 {
     font-family: 'Lexend', sans-serif;
   }

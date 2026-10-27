@@ -1,4 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import { App } from '@capacitor/app';
+import { Browser } from '@capacitor/browser';
+import { Capacitor } from '@capacitor/core';
 import type {
   UserProfile,
   PrintEnterprise,
@@ -388,7 +391,7 @@ interface PrintPerfectContextType {
     totalPages?: number;
     imageUrl?: string;
     orientation?: 'Portrait' | 'Landscape';
-  }) => void;
+  }) => Promise<UploadedDoc | null>;
   uploadMultipleDocs: (files: FileList | File[]) => void;
   removeCurrentDoc: () => void;
   removeUploadedDoc: (docId: string) => void;
@@ -456,7 +459,7 @@ interface PrintPerfectContextType {
   requireAuth: (action: () => void, title?: string, subtitle?: string) => boolean;
   loginWithEmail: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   registerWithEmail: (name: string, email: string, password: string, phone?: string) => Promise<{ success: boolean; error?: string }>;
-  loginWithGoogle: () => Promise<{ success: boolean; error?: string }>;
+  loginWithGoogle: () => Promise<{ success: boolean; error?: string; redirecting?: boolean }>;
   updatePassword: (oldPassword: string, newPassword: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
 }
@@ -2483,7 +2486,7 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
       }
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (session?.user) {
         setUser(prev => ({
           ...prev,
@@ -2494,11 +2497,105 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
           isAuthenticated: true,
           isGuest: false
         }));
+        if (event === 'SIGNED_IN') setIsAuthModalOpen(false);
       }
     });
 
     return () => {
       subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'android') return;
+
+    let isMounted = true;
+    let handledCallbackUrl: string | null = null;
+    let appUrlListener: { remove: () => Promise<void> } | undefined;
+
+    const handleAuthCallback = async (callbackUrl: string) => {
+      let parsedUrl: URL;
+      try {
+        parsedUrl = new URL(callbackUrl);
+      } catch {
+        return;
+      }
+
+      if (
+        parsedUrl.protocol !== 'com.printon24.app:' ||
+        parsedUrl.hostname !== 'auth' ||
+        parsedUrl.pathname !== '/callback' ||
+        handledCallbackUrl === callbackUrl
+      ) {
+        return;
+      }
+      handledCallbackUrl = callbackUrl;
+
+      const callbackError = parsedUrl.searchParams.get('error_description') ||
+        parsedUrl.searchParams.get('error') ||
+        new URLSearchParams(parsedUrl.hash.slice(1)).get('error_description') ||
+        new URLSearchParams(parsedUrl.hash.slice(1)).get('error');
+      if (callbackError) {
+        toast.error(`Google sign-in failed: ${callbackError}`);
+        return;
+      }
+
+      const code = parsedUrl.searchParams.get('code');
+      try {
+        if (code) {
+          const { error } = await supabase.auth.exchangeCodeForSession(code);
+          if (error) throw error;
+        } else {
+          const callbackParams = new URLSearchParams(parsedUrl.hash.slice(1));
+          const accessToken = callbackParams.get('access_token');
+          const refreshToken = callbackParams.get('refresh_token');
+          if (!accessToken || !refreshToken) {
+            throw new Error('Google sign-in returned without a valid session. Please try again.');
+          }
+
+          const { error } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken
+          });
+          if (error) throw error;
+        }
+      } catch (error) {
+        console.error('Could not complete native Google sign-in:', error);
+        toast.error(error instanceof Error
+          ? error.message
+          : 'Could not complete Google sign-in. Please try again.');
+        return;
+      }
+
+      if (isMounted) toast.success('Signed in with Google!');
+      try {
+        await Browser.close();
+      } catch (error) {
+        console.warn('Could not close the Google sign-in browser:', error);
+      }
+    };
+
+    const initializeAuthDeepLink = async () => {
+      appUrlListener = await App.addListener('appUrlOpen', ({ url }) => {
+        void handleAuthCallback(url);
+      });
+
+      const launchUrl = await App.getLaunchUrl();
+      if (launchUrl?.url) {
+        await handleAuthCallback(launchUrl.url);
+      }
+    };
+
+    void initializeAuthDeepLink().catch(error => {
+      console.error('Could not initialize native Google sign-in callback:', error);
+      if (isMounted) {
+        toast.error('Could not set up Google sign-in on this device. Please try again.');
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      if (appUrlListener) void appUrlListener.remove();
     };
   }, []);
 
@@ -2817,14 +2914,25 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
     }
   };
 
-  const loginWithGoogle = async (): Promise<{ success: boolean; error?: string }> => {
+  const loginWithGoogle = async (): Promise<{ success: boolean; error?: string; redirecting?: boolean }> => {
     try {
-      const { error } = await supabase.auth.signInWithOAuth({
+      const isNativeAndroid = Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android';
+      const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
-        options: { redirectTo: `${window.location.origin}/` }
+        options: {
+          redirectTo: isNativeAndroid
+            ? 'com.printon24.app://auth/callback'
+            : `${window.location.origin}/`,
+          skipBrowserRedirect: isNativeAndroid
+        }
       });
       if (error) throw error;
-      return { success: true };
+      if (isNativeAndroid) {
+        if (!data.url) throw new Error('Google sign-in did not return an authorization URL.');
+        await Browser.open({ url: data.url });
+        return { success: true, redirecting: true };
+      }
+      return { success: true, redirecting: false };
     } catch (err: any) {
       return { success: false, error: err.message };
     }

@@ -1,25 +1,28 @@
-import React, { useState } from 'react';
+import { Capacitor } from '@capacitor/core';
 import {
-  Menu,
-  Search,
   Bell,
-  Globe,
-  ChevronDown,
-  Crown,
   Building2,
   Check,
+  ChevronDown,
+  Crown,
+  Download,
+  Globe,
+  Menu,
   Printer,
-  RotateCcw
+  RotateCcw,
+  Search
 } from 'lucide-react';
+import React, { useState } from 'react';
 import { usePrintPerfect } from '../../contexts/PrintPerfectContext';
+import { APP_DOWNLOAD_URL } from '../../lib/appLinks';
+import type { Language } from '../../types/printperfect';
+import { DEFAULT_GUEST_PROFILE_PHOTO } from '../../types/printperfect';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger
 } from '../ui/dropdown-menu';
-import type { Language } from '../../types/printperfect';
-import { DEFAULT_GUEST_PROFILE_PHOTO } from '../../types/printperfect';
 
 interface DesktopHeaderProps {
   onSearch?: (query: string) => void;
@@ -53,6 +56,7 @@ export const DesktopHeader: React.FC<DesktopHeaderProps> = ({
   } = usePrintPerfect();
 
   const [searchVal, setSearchVal] = useState('');
+  const isWeb = !Capacitor.isNativePlatform();
   // User Requirement: "switch partenr print shop cha dropdown ahe tithe fisrt alwasy bu defoult madhe konich select karu nko fakt Select Enterprises cha show kar"
   const [hasManuallySelectedShop, setHasManuallySelectedShop] = useState(false);
 
@@ -172,6 +176,17 @@ export const DesktopHeader: React.FC<DesktopHeaderProps> = ({
             </span>
           )}
         </button>
+        {isWeb && (
+          <a
+            href={APP_DOWNLOAD_URL}
+            download="printon24.apk"
+            className="p-2 text-slate-700 hover:text-[#FF1300] rounded-full hover:bg-red-50 transition-colors"
+            aria-label="Download App"
+            title="Download App"
+          >
+            <Download className="w-5 h-5" />
+          </a>
+        )}
         {/* Language Indicator - English Only */}
         <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-700 rounded-full border border-slate-200 bg-white shadow-2xs">
           <Globe className="w-3.5 h-3.5 text-slate-600" />

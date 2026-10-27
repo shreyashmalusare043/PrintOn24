@@ -113,6 +113,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     const res = await loginWithGoogle();
     setLoading(false);
     if (res.success) {
+      if (res.redirecting) {
+        return;
+      }
       toast.success('Signed in with Google!');
       onClose();
       if (onSuccess) onSuccess();

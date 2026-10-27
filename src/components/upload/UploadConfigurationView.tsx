@@ -46,10 +46,14 @@ import { getPrintModeEligibility, type PrintSides, type PrintType } from '../../
 interface UploadConfigurationViewProps {
   onProceedToCheckout: () => void;
   onBackToHome?: () => void;
+  sharedFiles?: File[] | null;
+  onSharedFilesHandled?: () => void;
 }
 
 export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = ({
-  onProceedToCheckout
+  onProceedToCheckout,
+  sharedFiles,
+  onSharedFilesHandled
 }) => {
   const neutralSuccessToastStyle: React.CSSProperties = {
     background: '#fff',
@@ -95,6 +99,7 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
   }, []);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const lastProcessedSharedFilesRef = useRef<File[] | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const [showDocSwitcher, setShowDocSwitcher] = useState(false);
 
@@ -405,11 +410,14 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
 
       try {
         const detectedInfo = await detectFilePages(file);
-        await uploadNewDoc(file, {
+        const uploadedDoc = await uploadNewDoc(file, {
           totalPages: detectedInfo.pages,
           imageUrl: detectedInfo.imageUrl,
           orientation: detectedInfo.orientation
         });
+        if (!uploadedDoc) {
+          throw new Error(`Could not upload "${file.name}".`);
+        }
 
         clearInterval(ticker);
 
@@ -450,11 +458,14 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
         for (let i = 0; i < fileList.length; i++) {
           const f = fileList[i];
           const detected = await detectFilePages(f);
-          await uploadNewDoc(f, {
+          const uploadedDoc = await uploadNewDoc(f, {
             totalPages: detected.pages,
             imageUrl: detected.imageUrl,
             orientation: detected.orientation
           });
+          if (!uploadedDoc) {
+            throw new Error(`Could not upload "${f.name}".`);
+          }
         }
 
         clearInterval(multiTicker);
@@ -475,6 +486,17 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
       }
     }
   };
+
+  useEffect(() => {
+    if (!sharedFiles?.length) {
+      lastProcessedSharedFilesRef.current = null;
+      return;
+    }
+    if (lastProcessedSharedFilesRef.current === sharedFiles) return;
+
+    lastProcessedSharedFilesRef.current = sharedFiles;
+    void startUploadSimulation(sharedFiles).finally(() => onSharedFilesHandled?.());
+  }, [sharedFiles]);
 
   const handleFileDrop = (e: React.DragEvent) => {
     e.preventDefault();

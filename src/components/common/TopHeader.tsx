@@ -1,24 +1,27 @@
-import React from 'react';
+import { Capacitor } from '@capacitor/core';
 import {
-  Menu,
   Bell,
-  Globe,
+  Building2,
   CheckCircle2,
   ChevronDown,
-  Building2,
-  Store,
-  RotateCcw
+  Download,
+  Globe,
+  Menu,
+  RotateCcw,
+  Store
 } from 'lucide-react';
+import React from 'react';
 import { usePrintPerfect } from '../../contexts/PrintPerfectContext';
+import { APP_DOWNLOAD_URL } from '../../lib/appLinks';
+import type { Language } from '../../types/printperfect';
+
+import { getShopInitials } from '../../utils/shopInitials';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger
 } from '../ui/dropdown-menu';
-import type { Language } from '../../types/printperfect';
-
-import { getShopInitials } from '../../utils/shopInitials';
 
 interface TopHeaderProps {
   onOpenDrawer: () => void;
@@ -82,6 +85,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
 
   // Fallback shop image if none is set
   const shopImage = selectedEnterprise.logoUrl || '';
+  const isWeb = !Capacitor.isNativePlatform();
 
   return (
     <header className={`sticky top-0 z-30 w-full backdrop-blur-md pt-2.5 pb-2 px-4 transition-all shadow-[0_4px_16px_rgba(0,0,0,0.04)] border-b border-slate-100 bg-white rounded-br-[50px] ${className}`}>
@@ -124,7 +128,18 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
               </span>
             )}
           </button>
-          {/* Language Indicator - English Only */}
+            {isWeb && (
+              <a
+                href={APP_DOWNLOAD_URL}
+                download="printon24.apk"
+                className="p-2 text-slate-700 hover:text-[#FF1300] rounded-full hover:bg-red-50 active:scale-95 transition-colors"
+                aria-label="Download App"
+                title="Download App"
+              >
+                <Download className="w-5 h-5 stroke-[2.5]" />
+              </a>
+            )}
+            {/* Language Indicator - English Only */}
 
         </div>
       </div>
