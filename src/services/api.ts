@@ -500,6 +500,64 @@ export async function getPrintShops(): Promise<RemoteShopData[]> {
   }
 }
 
+// Public (SEO) shop listings — only non-sensitive columns are selected
+export interface PublicPrintShop {
+  id: string;
+  name: string;
+  address: string;
+  city: string;
+  landmark?: string;
+  phone?: string;
+  shopCode: string;
+  latitude: number;
+  longitude: number;
+  logoUrl?: string;
+  bannerUrl?: string;
+  qrCodeData?: string;
+  services: string[];
+}
+
+const PUBLIC_SHOP_COLUMNS = 'id,name,address,city,landmark,phone,contact_phone,shop_code,terminal_code,latitude,longitude,logo_url,banner_url,qr_code_data,services';
+
+export function shopSlug(name: string): string {
+  return name.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+function mapPublicShop(shop: any): PublicPrintShop {
+  return {
+    id: shop.id,
+    name: shop.name || '',
+    address: shop.address || '',
+    city: shop.city || 'Pune',
+    landmark: shop.landmark || undefined,
+    phone: shop.contact_phone || shop.phone || undefined,
+    shopCode: shop.shop_code || shop.terminal_code || shop.id,
+    latitude: Number(shop.latitude) || 18.5204,
+    longitude: Number(shop.longitude) || 73.8567,
+    logoUrl: shop.logo_url || undefined,
+    bannerUrl: shop.banner_url || undefined,
+    qrCodeData: shop.qr_code_data || undefined,
+    services: Array.isArray(shop.services) ? shop.services.map(String) : []
+  };
+}
+
+export async function fetchPublicPrintShops(): Promise<PublicPrintShop[]> {
+  const { data, error } = await supabase
+    .from('print_shops')
+    .select(PUBLIC_SHOP_COLUMNS)
+    .eq('status', 'active')
+    .order('name');
+  if (error) throw error;
+  return (data || []).map(mapPublicShop);
+}
+
+export async function fetchPublicPrintShopBySlug(slug: string): Promise<PublicPrintShop | null> {
+  const target = shopSlug(decodeURIComponent(slug));
+  if (!target) return null;
+  const shops = await fetchPublicPrintShops();
+  return shops.find(shop => shopSlug(shop.name) === target) || null;
+}
+
 export async function findShopByCodeOrId(identifier: string): Promise<RemoteShopData | null> {
   try {
     const cleanId = identifier.trim().replace(/^COPYGO:/i, '').replace(/^SHOP:/i, '');
