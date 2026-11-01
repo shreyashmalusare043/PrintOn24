@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Megaphone, Users, Target, Send, CheckCircle2 } from 'lucide-react';
 import { usePrintPerfect } from '../../contexts/PrintPerfectContext';
 import { toast } from 'sonner';
+import { advertiseFaqs } from '../../content/advertiseContent';
 
 interface RequestAdsViewProps {
   onBackToHome: () => void;
@@ -157,6 +158,17 @@ export const RequestAdsView: React.FC<RequestAdsViewProps> = ({ onBackToHome }) 
           </button>
         </form>
       </div>
+      <section className="hidden md:block bg-white rounded-3xl p-6 md:p-8 border border-slate-200/80 shadow-xs" aria-labelledby="request-ads-faq-heading">
+        <h2 id="request-ads-faq-heading" className="text-xl font-extrabold text-slate-900 font-heading">Advertising FAQs</h2>
+        <div className="mt-4 space-y-3">
+          {advertiseFaqs.map(([question, answer]) => (
+            <details key={question} className="group rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-sm font-bold text-slate-900 marker:content-none"><span>{question}</span><span className="text-lg text-[#FF1300] transition-transform group-open:rotate-45" aria-hidden="true">+</span></summary>
+              <p className="mt-3 border-t border-slate-200 pt-3 text-sm leading-6 text-slate-600">{answer}</p>
+            </details>
+          ))}
+        </div>
+      </section>
     </div>
   );
 };

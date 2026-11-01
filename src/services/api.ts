@@ -51,6 +51,59 @@ export interface CareerApplicationPayload {
   cover_note?: string;
 }
 
+export interface PublicPrintShop {
+  id: string;
+  name: string;
+  address: string;
+  city: string;
+  phone: string;
+  email?: string;
+  contactPhone?: string;
+  landmark?: string;
+  terminalCode: string;
+  shopCode: string;
+  qrCodeData?: string;
+  latitude?: number;
+  longitude?: number;
+  services: string[];
+  operatingHours: Record<string, string>;
+  logoUrl?: string;
+  bannerUrl?: string;
+  isOpen: boolean;
+  status: string;
+}
+
+export function shopSlug(name: string): string {
+  return name.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+function mapPublicPrintShop(row: any): PublicPrintShop {
+  return {
+    id: String(row.id), name: String(row.name), address: String(row.address || ''), city: String(row.city || 'Pune'),
+    phone: String(row.phone || row.contact_phone || ''), email: row.email ? String(row.email) : undefined,
+    contactPhone: row.contact_phone ? String(row.contact_phone) : undefined, landmark: row.landmark ? String(row.landmark) : undefined,
+    terminalCode: String(row.terminal_code || row.shop_code || row.id), shopCode: String(row.shop_code || row.terminal_code || row.id),
+    qrCodeData: row.qr_code_data ? String(row.qr_code_data) : undefined, latitude: row.latitude == null ? undefined : Number(row.latitude), longitude: row.longitude == null ? undefined : Number(row.longitude),
+    services: Array.isArray(row.services) ? row.services.filter((item: unknown): item is string => typeof item === 'string') : [],
+    operatingHours: row.operating_hours && typeof row.operating_hours === 'object' ? row.operating_hours : {},
+    logoUrl: row.logo_url ? String(row.logo_url) : undefined, bannerUrl: row.banner_url ? String(row.banner_url) : undefined,
+    isOpen: row.is_open === true, status: String(row.status || 'active')
+  };
+}
+
+export async function fetchPublicPrintShops(): Promise<PublicPrintShop[]> {
+  const { data, error } = await supabase.from('print_shops')
+    .select('id,name,address,city,phone,email,contact_phone,landmark,terminal_code,shop_code,qr_code_data,latitude,longitude,services,operating_hours,logo_url,banner_url,is_open,status,is_online')
+    .eq('status', 'active').eq('is_online', true).order('name');
+  if (error) throw error;
+  return (data || []).map(mapPublicPrintShop);
+}
+
+export async function fetchPublicPrintShopBySlug(slug: string): Promise<PublicPrintShop | null> {
+  const shops = await fetchPublicPrintShops();
+  return shops.find(shop => shopSlug(shop.name) === slug) || null;
+}
+
 export interface ContactMessagePayload {
   user_id?: string;
   name: string;

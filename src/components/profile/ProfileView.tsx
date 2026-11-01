@@ -45,6 +45,7 @@ import { DEFAULT_GUEST_PROFILE_PHOTO } from '../../types/printperfect';
 import { formatFullName, sanitizeNameInputs } from '../../utils/nameFormat';
 import { RealMapboxMap } from '../common/RealMapboxMap';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
+import { profileFaqs } from '../../content/profileFeatureContent';
 
 interface ProfileViewProps {
   onOpenSettings?: () => void;
@@ -965,6 +966,17 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           );
         })()}
       </div>
+      <section className="hidden md:block bg-white rounded-3xl p-5 border border-slate-200/90 shadow-sm space-y-4" aria-labelledby="profile-faq-heading">
+        <h3 id="profile-faq-heading" className="text-xl font-extrabold text-slate-900 font-heading">Profile &amp; Membership FAQs</h3>
+        <div className="grid gap-3">
+          {profileFaqs.map(([question, answer]) => (
+            <details key={question} className="group rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 font-bold text-sm marker:content-none"><span>{question}</span><span className="text-lg text-[#FF1300] transition-transform group-open:rotate-45" aria-hidden="true">+</span></summary>
+              <p className="mt-3 border-t border-slate-200 pt-3 text-xs leading-6 text-slate-700">{answer}</p>
+            </details>
+          ))}
+        </div>
+      </section>
       {/* Edit User Profile Dialog (Name, Surname, Email ID, Contact Number, Address only) */}
       <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
         <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-md bg-white rounded-3xl p-6">

@@ -51,6 +51,23 @@ interface UploadConfigurationViewProps {
   onSharedFilesHandled?: () => void;
 }
 
+const uploadFaqs: Array<[string, string]> = [
+  ['Which files can I upload to print?', 'You can upload PDF, Word, Excel, PowerPoint and image files. Select several files at once or add them one by one.'],
+  ['Can I upload more than one file in a single order?', 'Yes. Use Add Another File. Each file appears in the queued list with its own pages, settings and price.'],
+  ['How do I upload a document on printOn24?', 'Choose your print shop, select your file, wait for the upload to finish, set your print options and tap Send for Print and Pay.'],
+  ['How is the print price calculated?', 'The price depends on the shop rates, paper size, colour or black and white, total pages and copies. Estimate Total updates live as you change options.'],
+  ['Is the estimate the final price?', 'Estimate Total is calculated live from your selections and the shop rates. The final total is shown before you send the order.'],
+  ['Can I print only some pages?', 'Yes. In Page Range choose All Pages, Selected Pages or Custom Range and enter the pages you need.'],
+  ['What is Pages Per Sheet?', 'Pages Per Sheet places more than one page on each sheet. Choose 1-in-1, 2-in-1 or 4-in-1 in Print Configuration.'],
+  ['What is the difference between Single Side and Back to Back?', 'Single Side prints on one side of each sheet. Back to Back prints on both sides, using fewer sheets.'],
+  ['Can I print in colour and black and white?', 'Yes. Choose Colour or Black and White under Print Type. The price changes with your choice.'],
+  ['Can I print in landscape?', 'Yes. Choose Landscape in Layout. Portrait is the default for most documents.'],
+  ['Can I print photos or make a collage?', 'Yes. Use Image Editor to place several images on an A4 page with Auto Grid, crop, rotate and brightness tools.'],
+  ['What happens after I tap Send for Print and Pay?', 'Your order goes to the selected shop. You choose a payment method, get a pickup token and digital receipt, and collect the printout at the shop.'],
+  ['Is my uploaded document safe?', 'Uploaded documents follow the active storage and deletion policy described in the Privacy Policy.'],
+  ['Do I need to scan a QR code to upload?', 'No. A shop link or a search by name selects the shop for you. Scanning the QR code or typing the shop code works too.']
+];
+
 export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = ({
   onProceedToCheckout,
   sharedFiles,
@@ -2166,6 +2183,17 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
           </div>
         </div>
       )}
+      <section className="hidden md:block mt-10 rounded-3xl border border-slate-200 bg-white p-6 shadow-xs" aria-labelledby="upload-faq-heading">
+        <h2 id="upload-faq-heading" className="text-2xl font-black text-slate-900 font-heading">Frequently asked questions</h2>
+        <div className="mt-4 grid gap-4 text-sm text-slate-700">
+          {uploadFaqs.map(([question, answer]) => (
+            <details key={question} className="group rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 font-bold text-slate-900 marker:content-none"><span>{question}</span><span className="text-lg leading-none text-[#FF1300] transition-transform group-open:rotate-45" aria-hidden="true">+</span></summary>
+              <p className="mt-3 border-t border-slate-100 pt-3 leading-6 text-slate-700">{answer}</p>
+            </details>
+          ))}
+        </div>
+      </section>
       {/* 6. Image Editor Modal */}
       {isImageEditorOpen && (
         <ImageEditorModal
