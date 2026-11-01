@@ -1,8 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Megaphone, Users, Target, Send, CheckCircle2 } from 'lucide-react';
 import { usePrintPerfect } from '../../contexts/PrintPerfectContext';
 import { toast } from 'sonner';
-import { advertiseFaqs } from '../../content/advertiseContent';
 
 interface RequestAdsViewProps {
   onBackToHome: () => void;
@@ -19,13 +18,6 @@ export const RequestAdsView: React.FC<RequestAdsViewProps> = ({ onBackToHome }) 
   const [placement, setPlacement] = useState<'Home Banner' | 'Print Receipt Sponsor' | 'Sidebar Carousel'>('Home Banner');
   const [durationWeeks, setDurationWeeks] = useState(2);
   const [notes, setNotes] = useState('');
-
-  useEffect(() => {
-    document.title = 'Request for Ads - printOn24';
-    let robots = document.head.querySelector('meta[name="robots"]') as HTMLMetaElement | null;
-    if (!robots) { robots = document.createElement('meta'); robots.name = 'robots'; document.head.appendChild(robots); }
-    robots.content = 'noindex, nofollow';
-  }, []);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -59,8 +51,8 @@ export const RequestAdsView: React.FC<RequestAdsViewProps> = ({ onBackToHome }) 
           <span className="px-3 py-1 rounded-full bg-white/20 text-xs font-bold uppercase tracking-wider font-heading">
             Campus Ad Network
           </span>
-          <h1 className="text-2xl md:text-3xl font-black font-heading leading-tight">Advertise to Students and Professionals in Pune</h1>
-          <p className="text-xs md:text-sm text-white/90 font-normal">Promote hackathons, tech certifications, student discounts and job openings inside the printOn24 app and, where available, on printed receipt footers.</p>
+          <h1 className="text-2xl md:text-3xl font-black font-heading leading-tight">{"Reach 4,000+ Verified Peoples Every Single Day"}</h1>
+          <p className="text-xs md:text-sm text-white/90 font-normal">{"Promote hackathons, tech certifications, Peoples discounts, and job openings right inside the print app and on physical paper receipt footers."}</p>
         </div>
       </div>
       <div className="bg-white rounded-3xl p-6 md:p-8 border border-slate-200/80 shadow-xs space-y-4">
@@ -165,20 +157,6 @@ export const RequestAdsView: React.FC<RequestAdsViewProps> = ({ onBackToHome }) 
           </button>
         </form>
       </div>
-      <section className="hidden md:block bg-white rounded-3xl p-6 md:p-8 border border-slate-200/80 shadow-xs" aria-labelledby="request-ads-faq-heading">
-        <h2 id="request-ads-faq-heading" className="text-xl font-extrabold text-slate-900 font-heading">Advertising FAQs</h2>
-        <div className="mt-4 space-y-3">
-          {advertiseFaqs.map(([question, answer]) => (
-            <details key={question} className="group rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-sm font-bold text-slate-900 marker:content-none">
-                <span>{question}</span>
-                <span className="text-lg text-[#FF1300] transition-transform group-open:rotate-45" aria-hidden="true">+</span>
-              </summary>
-              <p className="mt-3 border-t border-slate-200 pt-3 text-sm leading-6 text-slate-600">{answer}</p>
-            </details>
-          ))}
-        </div>
-      </section>
     </div>
   );
 };

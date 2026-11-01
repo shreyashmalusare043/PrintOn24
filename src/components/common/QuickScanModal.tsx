@@ -1,16 +1,16 @@
-import React, { useState } from 'react';
 import {
-  X,
-  QrCode,
-  Zap,
+  Building2,
   Camera,
   CheckCircle2,
-  Building2,
-  ScanLine
+  QrCode,
+  ScanLine,
+  X,
+  Zap
 } from 'lucide-react';
+import React, { useState } from 'react';
+import { toast } from 'sonner';
 import { usePrintPerfect } from '../../contexts/PrintPerfectContext';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
-import { toast } from 'sonner';
 
 interface QuickScanModalProps {
   isOpen: boolean;
@@ -23,7 +23,7 @@ export const QuickScanModal: React.FC<QuickScanModalProps> = ({
   onClose,
   onSelectShop
 }) => {
-  const { enterprises, verifyAndSelectShopByCode, selectEnterprise } = usePrintPerfect();
+  const { enterprises, verifyAndSelectShopByCode, selectEnterprise, isShopOnline } = usePrintPerfect();
   const [manualCode, setManualCode] = useState('');
   const [isScanning, setIsScanning] = useState(true);
   const [flashOn, setFlashOn] = useState(false);
@@ -131,7 +131,7 @@ export const QuickScanModal: React.FC<QuickScanModalProps> = ({
               Tap to Test Scan Terminal:
             </p>
             <div className="grid grid-cols-2 gap-2">
-              {enterprises.slice(0, 4).map(ent => (
+              {enterprises.filter(enterprise => isShopOnline(enterprise.id)).slice(0, 4).map(ent => (
                 <button
                   key={ent.id}
                   type="button"

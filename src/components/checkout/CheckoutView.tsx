@@ -1,31 +1,31 @@
-import React, { useState, useEffect } from 'react';
 import {
+  AlertCircle,
   ArrowLeft,
-  CreditCard,
+  ArrowRight,
   Building2,
   CheckCircle2,
-  Wallet,
-  Coins,
-  ShieldCheck,
-  FileText,
-  Printer,
   ChevronRight,
-  ArrowRight,
-  Sparkles,
+  Coins,
+  CreditCard,
+  FileText,
   Lock,
-  AlertCircle
+  Printer,
+  ShieldCheck,
+  Sparkles,
+  Wallet
 } from 'lucide-react';
-import { usePrintPerfect } from '../../contexts/PrintPerfectContext';
-import type { PaymentMethod, PrintOrder } from '../../types/printperfect';
+import React, { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { usePrintPerfect } from '../../contexts/PrintPerfectContext';
+import { supabase } from '../../db/supabase';
 import {
   createPayUPaymentViaEdge,
-  verifyPayUPaymentViaEdge,
-  recordCounterPaymentViaEdge,
   getShopPrinters,
-  type ShopPrinterInfo
+  recordCounterPaymentViaEdge,
+  type ShopPrinterInfo,
+  verifyPayUPaymentViaEdge
 } from '../../services/api';
-import { supabase } from '../../db/supabase';
+import type { PaymentMethod, PrintOrder } from '../../types/printperfect';
 import { PayUCheckoutModal, type PayUData } from './PayUCheckoutModal';
 
 interface CheckoutViewProps {
@@ -146,6 +146,15 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
   // PayU Modal state
   const [payuModalData, setPayuModalData] = useState<PayUData | null>(null);
   const [isPayuModalOpen, setIsPayuModalOpen] = useState(false);
+  const goForPrintButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const frameId = window.requestAnimationFrame(() => {
+      goForPrintButtonRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, []);
 
   const handleGoForPrint = async () => {
     if (!hasExplicitlySelectedEnterprise) {
@@ -558,6 +567,7 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
       </div>
       {/* 17. Go For Print Button */}
       <button
+        ref={goForPrintButtonRef}
         type="button"
         disabled={isProcessing || !priceCalc.isValid}
         onClick={handleGoForPrint}

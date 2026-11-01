@@ -1,62 +1,63 @@
-import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
 import { App } from '@capacitor/app';
 import { Browser } from '@capacitor/browser';
 import { Capacitor } from '@capacitor/core';
-import type {
-  UserProfile,
-  PrintEnterprise,
-  MembershipPlan,
-  PrintOrder,
-  AppNotification,
-  UploadedDoc,
-  PrintConfig,
-  PaymentMethod,
-  UserFeedback,
-  AdRequest,
-  Language,
-  StudentProfile,
-  ShopService,
-  ShopReview,
-  NearbyShop,
-  PartnerRegistration,
-  ImageEditingState,
-  OrderStatus,
-  CustomPageRangeRule
-} from '../types/printperfect';
-import { DEFAULT_GUEST_PROFILE_PHOTO } from '../types/printperfect';
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { toast } from 'sonner';
 import {
-  INITIAL_USER,
   INITIAL_ENTERPRISES,
   INITIAL_MEMBERSHIPS,
-  INITIAL_ORDERS,
+  INITIAL_NEARBY_SHOPS,
   INITIAL_NOTIFICATIONS,
-  SAMPLE_DOCUMENTS,
-  INITIAL_STUDENT_PROFILES,
-  INITIAL_SERVICES,
+  INITIAL_ORDERS,
   INITIAL_REVIEWS,
-  INITIAL_NEARBY_SHOPS
+  INITIAL_SERVICES,
+  INITIAL_STUDENT_PROFILES,
+  INITIAL_USER,
+  SAMPLE_DOCUMENTS
 } from '../data/mockData';
-import { TRANSLATIONS } from '../utils/translations';
-import { toast } from 'sonner';
 import { supabase } from '../db/supabase';
 import { hashPassword, validatePasswordRules } from '../lib/authSecurity';
+import { isPrintModeEligible } from '../lib/printEligibility';
 import {
-  getOrCreateUserProfile,
   updateUserProfile as apiUpdateUserProfile,
+  convertDocumentViaBackend,
+  createDatabaseOrder,
+  fetchGuestProfileImage,
+  fetchShopByTerminalCode,
+  getOrCreateUserProfile,
   getPrintShops,
   getShopPrintPricing,
-  getUserOrders,
   getUserNotifications,
-  createDatabaseOrder,
-  fetchShopByTerminalCode,
+  getUserOrders,
   mapDbShopToEnterprise,
-  convertDocumentViaBackend,
-  fetchGuestProfileImage,
   submitShopReview
 } from '../services/api';
+import type {
+  AdRequest,
+  AppNotification,
+  CustomPageRangeRule,
+  ImageEditingState,
+  Language,
+  MembershipPlan,
+  NearbyShop,
+  OrderStatus,
+  PartnerRegistration,
+  PaymentMethod,
+  PrintConfig,
+  PrintEnterprise,
+  PrintOrder,
+  ShopReview,
+  ShopService,
+  StudentProfile,
+  UploadedDoc,
+  UserFeedback,
+  UserProfile
+} from '../types/printperfect';
+import { DEFAULT_GUEST_PROFILE_PHOTO } from '../types/printperfect';
 import { getPdfPageCount, getPdfPageInfo } from '../utils/pdfPageCount';
-import { isPrintModeEligible } from '../lib/printEligibility';
+import { getPowerPointSlideCount } from '../utils/powerPointSlideCount';
 import { getShopInitials } from '../utils/shopInitials';
+import { TRANSLATIONS } from '../utils/translations';
 
 const UNSELECTED_ENTERPRISE: PrintEnterprise = {
   id: '',
@@ -317,7 +318,7 @@ export const isDocConfigValid = (
     return { isValid: false, error: 'Document upload or processing in progress.' };
   }
   if (doc.conversionStatus === 'failed') {
-    return { isValid: false, error: 'Document conversion failed. Upload the file again before placing the order.' };
+    return { isValid: false, error: 'Document page count or preview could not be prepared. Upload the file again before placing the order.' };
   }
   if (
     (doc.fileType === 'XLS' || doc.fileType === 'XLSX') &&
@@ -366,6 +367,8 @@ interface PrintPerfectContextType {
   enterprises: PrintEnterprise[];
   selectedEnterprise: PrintEnterprise;
   hasExplicitlySelectedEnterprise: boolean;
+  isShopAvailabilityLoading: boolean;
+  isShopOnline: (shopId: string) => boolean;
   selectEnterprise: (enterpriseId: string) => void;
   resetEnterpriseSelection: () => void;
   clearUploadSession: () => void;
@@ -397,7 +400,7 @@ interface PrintPerfectContextType {
   removeUploadedDoc: (docId: string) => void;
   updateDocEditing: (docId: string, editing: ImageEditingState) => void;
   updateDocImageOutput: (docId: string, outputUrl: string, editingState: ImageEditingState) => void;
-  reconvertDocument: (docId: string, options: { selectedSheet?: string; scaling?: 'No Scaling' | 'Fit Sheet on One Page' | 'Fit All Columns on One Page' | 'Fit All Rows on One Page' }) => Promise<void>;
+  reconvertDocument: (docId: string, options: { selectedSheet?: string; scaling?: 'No Scaling' | 'Fit Sheet on One Page' | 'Fit All Columns on One Page' | 'Fit All Rows on One Page' }) => Promise<string | null>;
   validateSelectedPageRange: (rangeStr: string, totalPages: number) => { isValid: boolean; error?: string; pageCount: number; pages: number[] };
   validateCustomRanges: (rules: CustomPageRangeRule[], totalPages: number) => { isValid: boolean; error?: string; coveredPages: number[]; uncoveredPages: number[]; overlappingPages: number[] };
   isDocConfigValid: (doc: UploadedDoc | null | undefined) => { isValid: boolean; error?: string };
@@ -422,8 +425,8 @@ interface PrintPerfectContextType {
   isQuickScanOpen: boolean;
   openQuickScan: () => void;
   closeQuickScan: () => void;
-  pairTerminal: (terminalCode: string) => boolean;
-  pairTerminalByCode: (code: string) => boolean;
+  pairTerminal: (terminalCode: string) => Promise<boolean>;
+  pairTerminalByCode: (code: string) => Promise<boolean>;
   verifyAndSelectShopByCode: (code: string) => Promise<{ success: boolean; shop?: PrintEnterprise; message?: string }>;
   feedbackList: UserFeedback[];
   adRequests: AdRequest[];
@@ -534,9 +537,75 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   // 2. Enterprises
   const [enterprises, setEnterprises] = useState<PrintEnterprise[]>(INITIAL_ENTERPRISES);
+  const [shopAvailability, setShopAvailability] = useState<Record<string, boolean>>({});
+  const [isShopAvailabilityLoading, setIsShopAvailabilityLoading] = useState(true);
   const [selectedEnterpriseId, setSelectedEnterpriseId] = useState<string | null>(() => {
     return localStorage.getItem('printperfect_selected_ent') || null;
   });
+  const isShopOnline = (shopId: string) => shopAvailability[shopId] === true;
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const refreshShopAvailability = async () => {
+      const [availabilityResult, selectedShopResult] = await Promise.all([
+        supabase.from('print_shops').select('id, is_online'),
+        selectedEnterpriseId
+          ? supabase.rpc('resolve_shop_by_qr', { p_code: selectedEnterpriseId })
+          : Promise.resolve({ data: null, error: null })
+      ]);
+
+      if (!isMounted) return;
+
+      if (availabilityResult.error) {
+        console.error('Could not refresh print shop availability:', availabilityResult.error);
+        setIsShopAvailabilityLoading(false);
+        return;
+      }
+
+      const availability: Record<string, boolean> = Object.fromEntries(
+        (availabilityResult.data || []).map(shop => [shop.id, shop.is_online !== false])
+      );
+
+      if (selectedShopResult.error) {
+        console.error('Could not refresh selected PrintHub availability:', selectedShopResult.error);
+      } else if (Array.isArray(selectedShopResult.data)) {
+        const selectedShop = selectedShopResult.data[0];
+        if (selectedShop) {
+          availability[selectedShop.shop_id] = selectedShop.is_online === true;
+        }
+      }
+
+      setShopAvailability(availability);
+      setIsShopAvailabilityLoading(false);
+    };
+
+    void refreshShopAvailability();
+
+    const channel = supabase
+      .channel('print-shop-availability')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'print_shops' }, () => {
+        void refreshShopAvailability();
+      })
+      .subscribe();
+
+    const refreshInterval = window.setInterval(() => {
+      void refreshShopAvailability();
+    }, 15000);
+    const refreshOnVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void refreshShopAvailability();
+      }
+    };
+    document.addEventListener('visibilitychange', refreshOnVisible);
+
+    return () => {
+      isMounted = false;
+      window.clearInterval(refreshInterval);
+      document.removeEventListener('visibilitychange', refreshOnVisible);
+      supabase.removeChannel(channel);
+    };
+  }, [selectedEnterpriseId]);
 
   // Sync with Supabase on mount
   useEffect(() => {
@@ -565,6 +634,13 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
     // Load remote print shops
     getPrintShops().then(remoteShops => {
       if (!isMounted) return;
+
+      if (remoteShops.length > 0) {
+        setShopAvailability(current => ({
+          ...current,
+          ...Object.fromEntries(remoteShops.map(shop => [shop.id, shop.isOnline]))
+        }));
+      }
 
       const previouslySelectedShop = enterprises.find(shop => shop.id === selectedEnterpriseId);
       const selectedRemoteShop = remoteShops.find(
@@ -1086,19 +1162,12 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
     // Detect slide count & orientation for PowerPoint files
     if (validExt === 'PPT' || validExt === 'PPTX' || file.name.match(/\.pptx?$/i) || file.type.includes('presentation')) {
       detectedLayout = 'Landscape';
-      if (customData?.totalPages === undefined) {
+      if (validExt === 'PPTX' && (!customData?.totalPages || customData.totalPages < 1)) {
         try {
-          const buffer = await file.arrayBuffer();
-          const text = new TextDecoder('latin1').decode(buffer);
-          const slideMatches = text.match(/ppt\/slides\/slide\d+\.xml/g);
-          if (slideMatches && slideMatches.length > 0) {
-            const uniqueSlides = new Set(slideMatches).size;
-            if (uniqueSlides > 0) {
-              calculatedPages = uniqueSlides;
-            }
-          }
+          calculatedPages = await getPowerPointSlideCount(file);
         } catch (pptErr) {
-          console.warn('PPT slide count detection note:', pptErr);
+          calculatedPages = 0;
+          console.error('PPTX slide count detection failed:', pptErr);
         }
       }
     }
@@ -1129,43 +1198,76 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
       detectedLayout = customData.orientation;
     }
 
+    const isExcelDoc = ['XLS', 'XLSX'].includes(validExt) || file.name.match(/\.(xlsx?|csv)$/i);
+    const isOfficeDoc = ['DOC', 'DOCX', 'XLS', 'XLSX', 'PPT', 'PPTX'].includes(validExt) ||
+      file.name.match(/\.(docx?|xlsx?|csv|pptx?)$/i);
+
     let finalPreviewUrl = publicStorageUrl;
     let convertedPdfUrl = '';
     let isConverted = false;
+    let pageCountMatchesPreview = !isOfficeDoc;
     let conversionStatus: 'idle' | 'converting' | 'converted' | 'failed' = pdfPageCountFailed ? 'failed' : 'idle';
     let excelSheets: string[] | undefined = undefined;
     let selectedSheet = '';
     let excelScaling: 'No Scaling' | 'Fit Sheet on One Page' | 'Fit All Columns on One Page' | 'Fit All Rows on One Page' = 'No Scaling';
 
-    const isExcelDoc = ['XLS', 'XLSX'].includes(validExt) || file.name.match(/\.(xlsx?|csv)$/i);
-    const isOfficeDoc = ['DOC', 'DOCX', 'XLS', 'XLSX', 'PPT', 'PPTX'].includes(validExt) ||
-      file.name.match(/\.(docx?|xlsx?|csv|pptx?)$/i);
-
     if (isExcelDoc) {
       calculatedPages = 0;
       try {
-        const inspection = await convertDocumentViaBackend({
+        const isXlsx = validExt === 'XLSX' || /\.xlsx$/i.test(file.name);
+        const canInspectSheets = isXlsx || /\.csv$/i.test(file.name);
+        if (canInspectSheets) {
+          const inspection = await convertDocumentViaBackend({
+            fileUrl: publicStorageUrl,
+            fileName: file.name,
+            fileType: validExt,
+            inspectOnly: true,
+            userId: user.id,
+            shopId: selectedEnterprise.id,
+            docId
+          });
+          if (!inspection?.success || !inspection.sheets?.length) {
+            throw new Error(inspection?.error || 'No worksheets were found in this workbook.');
+          }
+          excelSheets = inspection.sheets;
+          selectedSheet = inspection.sheets[0];
+        }
+
+        conversionStatus = 'converting';
+        const convResult = await convertDocumentViaBackend({
           fileUrl: publicStorageUrl,
           fileName: file.name,
           fileType: validExt,
-          inspectOnly: true,
+          selectedSheet: selectedSheet || undefined,
+          scaling: 'No Scaling',
           userId: user.id,
           shopId: selectedEnterprise.id,
           docId
         });
-        if (!inspection?.success || !inspection.sheets?.length) {
-          throw new Error(inspection?.error || 'No worksheets were found in this workbook.');
+        if (!convResult?.success || !convResult.pdfUrl) {
+          throw new Error(convResult?.error || `Could not prepare a page preview for "${file.name}".`);
         }
-        excelSheets = inspection.sheets;
-        selectedSheet = inspection.sheets[0];
-        conversionStatus = 'idle';
+        if (
+          typeof convResult.totalPages !== 'number' ||
+          !Number.isSafeInteger(convResult.totalPages) ||
+          convResult.totalPages < 1
+        ) {
+          throw new Error('The document renderer did not return a valid page count.');
+        }
+
+        calculatedPages = convResult.totalPages;
+        convertedPdfUrl = convResult.pdfUrl;
+        finalPreviewUrl = convResult.pdfUrl;
+        isConverted = true;
+        pageCountMatchesPreview = true;
+        conversionStatus = 'converted';
       } catch (inspectErr) {
         calculatedPages = 0;
         conversionStatus = 'failed';
-        console.error('Excel workbook inspection failed:', inspectErr);
+        console.error('Excel page rendering failed:', inspectErr);
         toast.error(inspectErr instanceof Error
-          ? `Could not read Excel sheets: ${inspectErr.message}`
-          : 'Could not read Excel sheets. Please upload the workbook again.');
+          ? `Could not prepare Excel page count: ${inspectErr.message}`
+          : 'Could not prepare Excel page count. Please upload the workbook again.');
       }
     } else if (isOfficeDoc) {
       calculatedPages = 0;
@@ -1190,19 +1292,20 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
           convertedPdfUrl = convResult.pdfUrl;
           finalPreviewUrl = convResult.pdfUrl;
           isConverted = true;
+          pageCountMatchesPreview = true;
           conversionStatus = 'converted';
           if (convResult.sheets && convResult.sheets.length > 0) {
             excelSheets = convResult.sheets;
             selectedSheet = convResult.sheets[0];
           }
         } else {
-          calculatedPages = 0;
+          calculatedPages = validExt === 'PPTX' ? calculatedPages : 0;
           conversionStatus = 'failed';
           toast.error(convResult?.error || `Could not convert "${file.name}". Please upload it again.`);
         }
       } catch (convErr) {
         console.error('Document conversion failed:', convErr);
-        calculatedPages = 0;
+        calculatedPages = validExt === 'PPTX' ? calculatedPages : 0;
         conversionStatus = 'failed';
         toast.error(convErr instanceof Error
           ? `Could not convert "${file.name}": ${convErr.message}`
@@ -1244,6 +1347,7 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
       previewUrl: finalPreviewUrl || publicStorageUrl || imgUrl,
       convertedPdfUrl: convertedPdfUrl || undefined,
       isConverted,
+      pageCountMatchesPreview,
       conversionStatus,
       excelSheets,
       selectedSheet,
@@ -1280,8 +1384,8 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
           storage_bucket: 'print_documents',
           storage_path: storagePath,
           upload_status: 'READY',
-          preview_url: finalPreviewUrl || publicStorageUrl,
-          converted_pdf_url: convertedPdfUrl || null,
+          preview_url: newDoc.previewUrl || publicStorageUrl,
+          converted_pdf_url: newDoc.convertedPdfUrl || null,
           original_file_url: publicStorageUrl,
           excel_sheets: excelSheets || null,
           excel_scaling: excelScaling,
@@ -1447,9 +1551,13 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const reconvertDocument = async (docId: string, options: {
     selectedSheet?: string;
     scaling?: 'No Scaling' | 'Fit Sheet on One Page' | 'Fit All Columns on One Page' | 'Fit All Rows on One Page';
-  }) => {
+  }): Promise<string | null> => {
     const doc = uploadedDocs.find(d => d.id === docId);
-    if (!doc) return;
+    if (!doc) return null;
+    if (!doc.storageUrl) {
+      toast.error('The original file is unavailable. Please upload it again.');
+      return null;
+    }
 
     setUploadedDocs(prev => prev.map(d =>
       d.id === docId ? { ...d, conversionStatus: 'converting' } : d
@@ -1457,10 +1565,10 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
     if (currentDoc?.id === docId) {
       setCurrentDoc(prev => prev ? { ...prev, conversionStatus: 'converting' } : null);
     }
-    toast.loading('Converting with selected sheet & scaling...', { id: `conv-${docId}` });
+    toast.loading('Preparing page preview with selected sheet & scaling...', { id: `conv-${docId}` });
     try {
       const convResult = await convertDocumentViaBackend({
-        fileUrl: doc.storageUrl || doc.previewUrl,
+        fileUrl: doc.storageUrl,
         fileName: doc.originalFileName || doc.fileName,
         fileType: doc.fileType,
         selectedSheet: options.selectedSheet || doc.selectedSheet,
@@ -1485,6 +1593,7 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
               selectedSheet: options.selectedSheet || d.selectedSheet,
               excelScaling: options.scaling || d.excelScaling,
               isConverted: true,
+              pageCountMatchesPreview: true,
               conversionStatus: 'converted'
             };
           }
@@ -1500,28 +1609,34 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
             selectedSheet: options.selectedSheet || prev.selectedSheet,
             excelScaling: options.scaling || prev.excelScaling,
             isConverted: true,
+            pageCountMatchesPreview: true,
             conversionStatus: 'converted'
           } : null);
         }
 
-        // Persist updated Excel scaling and sheet to database
+        // Keep original-file fields unchanged while persisting the PDF used only for preview.
         try {
-          supabase.from('uploaded_documents').update({
+          const { error: previewPersistError } = await supabase.from('uploaded_documents').update({
+            total_pages: newTotalPages,
             preview_url: convResult.pdfUrl,
             converted_pdf_url: convResult.pdfUrl,
-            total_pages: newTotalPages,
+            conversion_service: convResult.method || 'Gotenberg-LibreOffice',
             excel_scaling: options.scaling || doc.excelScaling,
             print_config: {
               ...doc.printConfig,
               excelScaling: options.scaling,
               selectedSheet: options.selectedSheet || doc.selectedSheet
             }
-          }).eq('id', docId).then();
+          }).eq('id', docId);
+          if (previewPersistError) {
+            console.warn('Failed to persist reconverted document preview:', previewPersistError.message);
+          }
         } catch (dbErr) {
           console.warn('Failed to persist reconverted document settings:', dbErr);
         }
 
-        toast.success(`Converted to PDF (${newTotalPages} page${newTotalPages > 1 ? 's' : ''})!`, { id: `conv-${docId}` });
+        toast.success(`Page preview updated (${newTotalPages} page${newTotalPages > 1 ? 's' : ''}).`, { id: `conv-${docId}` });
+        return convResult.pdfUrl;
       } else {
         setUploadedDocs(prev => prev.map(d =>
           d.id === docId ? { ...d, conversionStatus: 'failed' } : d
@@ -1529,7 +1644,8 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
         if (currentDoc?.id === docId) {
           setCurrentDoc(prev => prev ? { ...prev, conversionStatus: 'failed' } : null);
         }
-        toast.error(convResult?.error || 'Conversion failed. Please try again.', { id: `conv-${docId}` });
+        toast.error(convResult?.error || 'Could not update the page preview. Please try again.', { id: `conv-${docId}` });
+        return null;
       }
     } catch (e: any) {
       setUploadedDocs(prev => prev.map(d =>
@@ -1538,7 +1654,8 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
       if (currentDoc?.id === docId) {
         setCurrentDoc(prev => prev ? { ...prev, conversionStatus: 'failed' } : null);
       }
-      toast.error(`Conversion failed: ${e.message}`, { id: `conv-${docId}` });
+      toast.error(`Could not update the page preview: ${e.message}`, { id: `conv-${docId}` });
+      return null;
     }
   };
 
@@ -2193,7 +2310,16 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
         return {
           id: d.id,
           fileName: d.fileName,
+          originalFileName: d.originalFileName || d.fileName,
           fileType: d.fileType,
+          mimeType: d.mimeType || 'application/octet-stream',
+          fileUrl: d.storageUrl || '',
+          originalFileUrl: d.storageUrl || '',
+          storageBucket: d.storageBucket || 'print_documents',
+          storagePath: d.storagePath,
+          original_file_url: d.storageUrl || '',
+          storage_bucket: d.storageBucket || 'print_documents',
+          storage_path: d.storagePath,
           totalPages: d.totalPages,
           config: {
             ...(isCustom ? { ...docCfg, printType: '' as any, sides: '' as any } : docCfg),
@@ -2275,7 +2401,7 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
             storage_bucket: 'print_documents',
             storage_path: doc.storagePath,
             upload_status: 'READY',
-            preview_url: doc.previewUrl,
+            preview_url: doc.previewUrl || doc.storageUrl || null,
             converted_pdf_url: doc.convertedPdfUrl || (doc.fileType === 'PDF' ? doc.previewUrl : null),
             original_file_url: doc.storageUrl || doc.previewUrl,
             excel_sheets: doc.excelSheets || null,
@@ -3001,35 +3127,28 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const openQuickScan = () => setIsQuickScanOpen(true);
   const closeQuickScan = () => setIsQuickScanOpen(false);
 
-  const pairTerminal = (terminalCode: string): boolean => {
-    const matched = enterprises.find(e => e.terminalCode.toLowerCase() === terminalCode.toLowerCase() || e.shortCode.toLowerCase() === terminalCode.toLowerCase());
-    if (matched) {
-      selectEnterprise(matched.id);
-      setIsQuickScanOpen(false);
-      toast.success(`Paired with terminal ${matched.terminalCode} (${matched.name})! Ready to print.`);
+  const pairTerminal = async (terminalCode: string): Promise<boolean> => {
+    const result = await verifyAndSelectShopByCode(terminalCode);
+    if (result.success && result.shop) {
+      toast.success(`Paired with terminal ${result.shop.terminalCode} (${result.shop.name})! Ready to print.`);
       return true;
     }
-    toast.error('Terminal code not recognized. Please scan a valid printOn24 terminal.');
+    toast.error(result.message || 'Terminal code not recognized. Please scan a valid printOn24 terminal.');
     return false;
   };
 
-  const pairTerminalByCode = (code: string): boolean => {
+  const pairTerminalByCode = async (code: string): Promise<boolean> => {
     if (!code || !code.trim()) {
       toast.error('Please enter a valid terminal code.');
       return false;
     }
-    const clean = code.trim().toLowerCase();
-    const matched = enterprises.find(
-      e => e.terminalCode.toLowerCase() === clean ||
-           e.shortCode.toLowerCase() === clean ||
-           e.name.toLowerCase().includes(clean)
-    );
-    if (matched) {
-      selectEnterprise(matched.id);
-      toast.success(`Linked Shop: ${matched.name} (${matched.terminalCode})! Print preferences loaded.`);
+
+    const result = await verifyAndSelectShopByCode(code);
+    if (result.success && result.shop) {
+      toast.success(`Linked Shop: ${result.shop.name} (${result.shop.terminalCode})! Print preferences loaded.`);
       return true;
     }
-    toast.error(`No printOn24 terminal found for code "${code}". Please check the shop counter stand or scan its QR code.`);
+    toast.error(result.message || `No printOn24 terminal found for code "${code}". Please check the shop counter stand or scan its QR code.`);
     return false;
   };
 
@@ -3040,71 +3159,67 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
       return { success: false, message: 'Please enter a shop terminal code.' };
     }
     const clean = rawCode.trim().replace(/^COPYGO:/i, '').replace(/^SHOP:/i, '').toLowerCase();
+    let verifiedShop: {
+      shop_id: string;
+      shop_code: string | null;
+      terminal_code: string | null;
+      is_online: boolean;
+    } | null = null;
 
-    // Check if shop is disabled/inactive in database before returning details
+    // Resolve QR/terminal codes through the database function so QR aliases are covered.
     try {
-      const { data: dbCheck } = await supabase
-        .from('print_shops')
-        .select('id, status, is_open')
-        .or(`terminal_code.ilike.${clean},shop_code.ilike.${clean},id.eq.${clean},name.ilike.%${clean}%`)
-        .limit(1)
-        .maybeSingle();
+      const { data: resolvedShops, error } = await supabase.rpc('resolve_shop_by_qr', {
+        p_code: clean
+      });
 
-      if (
-        dbCheck &&
-        (dbCheck.status === 'inactive' ||
-          dbCheck.status === 'disabled' ||
-          dbCheck.is_open === false)
-      ) {
+      if (error) {
+        console.error('Could not verify scanned print shop availability:', error);
         return {
           success: false,
-          message: 'This print shop is currently unavailable. Please select another shop.'
+          message: 'Could not verify this PrintHub right now. Please try again.'
+        };
+      }
+
+      verifiedShop = Array.isArray(resolvedShops) ? resolvedShops[0] : null;
+      if (!verifiedShop) {
+        return {
+          success: false,
+          message: 'This PrintHub is unavailable or its code is invalid.'
+        };
+      }
+      setShopAvailability(current => ({
+        ...current,
+        [verifiedShop.shop_id]: verifiedShop.is_online === true
+      }));
+      if (verifiedShop.is_online !== true) {
+        return {
+          success: false,
+          message: 'PrintHub Is Offline. Please scan or select an online PrintHub.'
         };
       }
     } catch (err) {
-      console.warn('Error verifying shop status:', err);
-    }
-
-    // 1. Search in local enterprises state
-    let matched = enterprises.find(
-      e =>
-        e.terminalCode.toLowerCase() === clean ||
-        e.shortCode.toLowerCase() === clean ||
-        e.id.toLowerCase() === clean ||
-        e.name.toLowerCase() === clean
-    );
-
-    // If local match is marked inactive/disabled, block access
-    if (
-      matched &&
-      (matched.isOpen === false ||
-        (matched as any).status === 'inactive' ||
-        (matched as any).status === 'disabled')
-    ) {
+      console.error('Error verifying print shop availability:', err);
       return {
         success: false,
-        message: 'This print shop is currently unavailable. Please select another shop.'
+        message: 'Could not verify this PrintHub right now. Please try again.'
       };
     }
 
-    // 2. Query Supabase directly if not found locally
+    let matched = enterprises.find(enterprise => enterprise.id === verifiedShop.shop_id);
     if (!matched) {
-      try {
-        const remoteMatch = await fetchShopByTerminalCode(rawCode);
-        if (remoteMatch) {
-          matched = remoteMatch;
-          setEnterprises(prev => {
-            const existingIndex = prev.findIndex(e => e.id === remoteMatch.id);
-            if (existingIndex >= 0) {
-              return prev.map((enterprise, index) =>
-                index === existingIndex ? { ...enterprise, ...remoteMatch } : enterprise
-              );
-            }
-            return [...prev, remoteMatch];
-          });
-        }
-      } catch (err) {
-        console.warn('Error fetching shop by terminal code:', err);
+      const verifiedCode = verifiedShop.terminal_code || verifiedShop.shop_code || clean;
+      const remoteMatch = await fetchShopByTerminalCode(verifiedCode);
+      if (remoteMatch && remoteMatch.id === verifiedShop.shop_id) {
+        matched = remoteMatch;
+        setEnterprises(previous => {
+          const existingIndex = previous.findIndex(enterprise => enterprise.id === remoteMatch.id);
+          if (existingIndex >= 0) {
+            return previous.map((enterprise, index) =>
+              index === existingIndex ? { ...enterprise, ...remoteMatch } : enterprise
+            );
+          }
+          return [...previous, remoteMatch];
+        });
       }
     }
 
@@ -3433,6 +3548,8 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
         enterprises,
         selectedEnterprise,
         hasExplicitlySelectedEnterprise,
+        isShopAvailabilityLoading,
+        isShopOnline,
         selectEnterprise,
         resetEnterpriseSelection,
         clearUploadSession,
