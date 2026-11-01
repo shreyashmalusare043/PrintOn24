@@ -2183,7 +2183,7 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
           </div>
         </div>
       )}
-      <section className="hidden md:block mt-10 rounded-3xl border border-slate-200 bg-white p-6 shadow-xs" aria-labelledby="upload-faq-heading">
+      <section className="mt-10 rounded-3xl border border-slate-200 bg-white p-6 shadow-xs" aria-labelledby="upload-faq-heading">
         <h2 id="upload-faq-heading" className="text-2xl font-black text-slate-900 font-heading">Frequently asked questions</h2>
         <div className="mt-4 grid gap-4 text-sm text-slate-700">
           {uploadFaqs.map(([question, answer]) => (
