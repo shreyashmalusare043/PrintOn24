@@ -1,5 +1,6 @@
 import { ArrowLeft, CheckCircle2, Download, Expand, FileImage, Share2, Smartphone, X } from 'lucide-react';
-import React from 'react';
+import React, { useEffect } from 'react';
+import { howToUseFaqs } from '../../content/howToUseContent';
 
 interface HowToUseViewProps {
   onBackToHome: () => void;
@@ -21,6 +22,13 @@ const sharingSteps = [
 
 export const HowToUseView: React.FC<HowToUseViewProps> = ({ onBackToHome }) => {
   const [isFlowChatFullscreen, setIsFlowChatFullscreen] = React.useState(false);
+
+  useEffect(() => {
+    document.title = 'How To Use - printOn24';
+    let robots = document.head.querySelector('meta[name="robots"]') as HTMLMetaElement | null;
+    if (!robots) { robots = document.createElement('meta'); robots.name = 'robots'; document.head.appendChild(robots); }
+    robots.content = 'noindex, follow, noarchive';
+  }, []);
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6 px-4 pb-32 pt-2 md:px-6 md:pb-10">
@@ -152,6 +160,10 @@ export const HowToUseView: React.FC<HowToUseViewProps> = ({ onBackToHome }) => {
         </div>
         <Smartphone className="hidden h-5 w-5 shrink-0 text-emerald-600 sm:block" />
       </div>
+      <section className="hidden md:block rounded-3xl border border-slate-200 bg-white p-5 shadow-sm" aria-labelledby="how-to-use-faq-heading">
+        <h2 id="how-to-use-faq-heading" className="text-xl font-extrabold text-slate-900">How to Use FAQs</h2>
+        <div className="mt-4 grid gap-3">{howToUseFaqs.map(([question, answer]) => <details key={question} className="group rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"><summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-sm font-bold"><span>{question}</span><span className="text-lg text-[#FF1300] transition-transform group-open:rotate-45" aria-hidden="true">+</span></summary><p className="mt-3 border-t border-slate-200 pt-3 text-xs leading-6 text-slate-700">{answer}</p></details>)}</div>
+      </section>
     </div>
   );
 };

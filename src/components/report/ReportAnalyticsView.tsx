@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   FileText,
   Download,
@@ -40,6 +40,23 @@ import {
 } from '../ui/dropdown-menu';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
 
+const reportFaqs = [
+  ['What does the printOn24 report show?', 'It shows Total Prints, Total Spent, Download Logs, Average Order Value and monthly printing activity.'],
+  ['Where can I find my report?', 'Open the Report tab in the printOn24 app to view Personal Report and Analytics.'],
+  ['Is the report only about my own prints?', 'Yes. The report is personal to your account and shows your own processed printing activity.'],
+  ['What does Total Prints mean?', 'Total Prints is the number of pages printed in the selected period.'],
+  ['What does Total Spent mean?', 'Total Spent is the amount from your processed print orders in the selected period.'],
+  ['What are Download Logs?', 'Download Logs count files downloaded from your printOn24 activity, such as digital receipts.'],
+  ['What is Average Order Value?', 'Average Order Value is your total spent divided by the number of processed orders.'],
+  ['How do I change the report time period?', 'Use the period filter to change the range used by the report summary cards.'],
+  ['How do I view a different month?', 'Use the arrows beside the month name in Printing Activity Overview.'],
+  ['What are the print categories?', 'Prints are grouped as Documents, Color Prints, Photos and Assignments in the chart.'],
+  ['What does a chart tooltip show?', 'A chart point can show the file name, category, date, pages and cost.'],
+  ['Why is my report empty?', 'The report has no activity when there are no processed orders in the selected period.'],
+  ['Can I see colour and black and white pages?', 'Yes. The activity overview shows colour and B&W page counts for the selected month.'],
+  ['Are my documents stored in the report?', 'No. The report uses order details, while uploaded documents are automatically deleted within 12 hours.']
+];
+
 interface ReportAnalyticsViewProps {
   onViewReceipt: (order: PrintOrder) => void;
   onBackToHome: () => void;
@@ -52,6 +69,19 @@ export const ReportAnalyticsView: React.FC<ReportAnalyticsViewProps> = ({
   onOpenMyReceipts
 }) => {
   const { user, selectedEnterprise, orders } = usePrintPerfect();
+  useEffect(() => {
+    if (!window.location.pathname.startsWith('/app/report')) return;
+    document.title = 'Personal Report and Analytics | printOn24';
+    let robots = document.head.querySelector('meta[name="robots"]') as HTMLMetaElement | null;
+    if (!robots) {
+      robots = document.createElement('meta');
+      robots.setAttribute('name', 'robots');
+      document.head.appendChild(robots);
+    }
+    robots.setAttribute('content', 'noindex, nofollow, noarchive');
+    document.head.querySelector('link[rel="canonical"]')?.remove();
+    document.head.querySelector('#print-reports-page-jsonld')?.remove();
+  }, []);
   const [selectedRange, setSelectedRange] = useState<'Last 2 Days' | 'Last 7 Days' | 'Last 30 Days' | 'Last 90 Days'>('Last 30 Days');
   const [activeTimeFilter, setActiveTimeFilter] = useState<'7D' | '30D' | '90D'>('30D');
   const [showAllLogs, setShowAllLogs] = useState(false);
@@ -566,6 +596,21 @@ export const ReportAnalyticsView: React.FC<ReportAnalyticsViewProps> = ({
           </div>
         )}
       </div>
+
+      <section className="hidden md:block rounded-3xl border border-slate-200/90 bg-white p-5 shadow-sm" aria-labelledby="report-faq-title">
+        <h2 id="report-faq-title" className="text-lg font-black text-slate-900 font-heading">Frequently asked questions</h2>
+        <div className="mt-4 grid gap-4 text-sm text-slate-700">
+          {reportFaqs.map(([question, answer]) => (
+            <details key={question} className="group rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 font-bold text-slate-900 marker:content-none">
+                <span>{question}</span>
+                <span className="text-lg leading-none text-[#FF1300] transition-transform group-open:rotate-45" aria-hidden="true">+</span>
+              </summary>
+              <p className="mt-3 border-t border-slate-200 pt-3 leading-6 text-slate-700">{answer}</p>
+            </details>
+          ))}
+        </div>
+      </section>
     </div>
   );
 };

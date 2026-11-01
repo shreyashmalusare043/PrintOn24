@@ -1,37 +1,68 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import jsQR from 'jsqr';
 import {
-  QrCode,
+  AlertCircle,
+  ArrowRight,
+  Building2,
   Camera,
   CheckCircle2,
+  HelpCircle,
+  Image as ImageIcon,
   MapPin,
   Phone,
-  ArrowRight,
-  Sparkles,
-  RefreshCw,
-  Building2,
-  AlertCircle,
-  Tag,
-  Image as ImageIcon,
-  Zap,
-  ZapOff,
-  SwitchCamera,
   Play,
-  Square,
-  Volume2,
-  HelpCircle,
-  X,
+  QrCode,
+  RefreshCw,
   Search,
-  Star
+  Sparkles,
+  Square,
+  Star,
+  SwitchCamera,
+  Tag,
+  Volume2,
+  X,
+  Zap,
+  ZapOff
 } from 'lucide-react';
-import jsQR from 'jsqr';
-import { usePrintPerfect } from '../../contexts/PrintPerfectContext';
-import { getShopInitials } from '../../utils/shopInitials';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { usePrintPerfect } from '../../contexts/PrintPerfectContext';
+import { fetchPublicPrintShops, shopSlug, type PublicPrintShop } from '../../services/api';
+import { getShopInitials } from '../../utils/shopInitials';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
 
 interface ScanViewProps {
   onProceedToUpload: () => void;
 }
+
+const scanFaqs = [
+  ['How do I connect to a print shop on printOn24?', 'Scan the shop stand QR with the Live Counter Scanner, choose a QR image from your gallery, or enter the shop code or name and tap Fetch and Connect.'],
+  ['Where do I find the shop QR code?', 'Look for the printOn24 QR on the print shop stand or counter. The shop can also share its link or shop code.'],
+  ['What is a shop code or terminal code?', 'A shop code, also called a terminal code, is the unique ID for a partner shop. Enter it to connect to that shop before uploading your documents.'],
+  ['How do I scan the QR code?', 'Tap Start Scanner, allow camera access and hold the QR inside the frame under Aim at Shop Stand QR.'],
+  ['Why does it say Camera is Paused?', 'The scanner starts paused. Tap Start Scanner or the play button to turn the camera on and begin reading the QR code.'],
+  ['What if the camera does not work?', 'Allow camera permission in your browser settings, open the page in Chrome or Safari, or use Choose From Gallery or Enter Code Manually instead.'],
+  ['Can I scan a QR code from a photo or screenshot?', 'Yes. Tap Choose From Gallery and select the image that contains the printOn24 QR code.'],
+  ['Can I switch between the front and back camera?', 'Yes. Use the camera switch button next to the play button to change between the front and back cameras.'],
+  ['Do I have to scan a QR code to print?', 'No. Enter the shop code, search by shop name, use Quick Terminals when available, or open the shop link.'],
+  ['What does Fetch and Connect do?', 'Fetch and Connect looks up the shop code or name you entered and connects your session to that partner shop.'],
+  ['What does Search Shop do?', 'Search Shop looks up active partner shops by name, area or code so you can select the correct shop.'],
+  ['What are Quick Terminals?', 'Quick Terminals are shop-code buttons for shops you have used before, allowing you to connect without typing the code.'],
+  ['What does Verified Terminal mean?', 'Verified Terminal means the shop is an approved and active printOn24 partner.'],
+  ['What details do I see after connecting?', 'The Connected Printing Partner card shows the available shop name, address, phone, Terminal ID, services and black and white and colour rates.'],
+  ['How can I check the shop rates before printing?', 'After connecting, the Connected Printing Partner card shows the shop rates available for black and white and colour printing.'],
+  ['Can I connect to a different shop?', 'Yes. Scan another QR code or enter another shop code to change the connected shop.'],
+  ['What happens after I connect?', 'The connected shop name and code appear in the app, and your next upload and print order are sent to that shop.'],
+  ['Does printOn24 store my camera images?', 'The scanner uses the camera to read the QR code in your browser. Camera frames are not uploaded as part of the scan flow.'],
+  ['My shop code was not found. What should I do?', 'Check the spelling, capital letters and hyphens, or search by shop name. If it still fails, ask the shop for its current code.']
+];
+
+const scanConnectionSteps = [
+  'Find the printOn24 QR on the shop stand or counter.',
+  'Tap Start Scanner, allow camera access and aim at the Shop Stand QR.',
+  'Or tap Choose From Gallery, enter the shop code or name, or use Search Shop.',
+  'Confirm the shop details in the Connected Printing Partner card.',
+  'Continue to Upload, set print options and send the order to the connected shop.'
+];
 
 export const ScanView: React.FC<ScanViewProps> = ({ onProceedToUpload }) => {
   const {
@@ -41,10 +72,15 @@ export const ScanView: React.FC<ScanViewProps> = ({ onProceedToUpload }) => {
     hasExplicitlySelectedEnterprise,
     verifyAndSelectShopByCode,
     selectEnterprise,
+    isShopOnline,
     t
   } = usePrintPerfect();
 
-  const [manualCode, setManualCode] = useState('');
+  const scanSearchParams = new URLSearchParams(window.location.search);
+  const scanCode = scanSearchParams.get('code') || '';
+  const isPublicScanRoute = window.location.pathname === '/scan';
+  const hasScanCode = isPublicScanRoute && Boolean(scanCode);
+  const [manualCode, setManualCode] = useState(scanCode);
   const [isDetected, setIsDetected] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -62,6 +98,108 @@ export const ScanView: React.FC<ScanViewProps> = ({ onProceedToUpload }) => {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const suggestionsRef = useRef<HTMLDivElement>(null);
 
+  const [publicPartnerShops, setPublicPartnerShops] = useState<PublicPrintShop[]>([]);
+
+  useEffect(() => {
+    if (!isPublicScanRoute) return;
+    let mounted = true;
+    fetchPublicPrintShops()
+      .then(shops => mounted && setPublicPartnerShops(shops))
+      .catch(error => console.error('Unable to load public scan shop links:', error));
+    return () => { mounted = false; };
+  }, [isPublicScanRoute]);
+
+  const scanSchema = {
+    '@context': 'https://schema.org',
+    '@graph': [
+      {
+        '@type': 'WebPage',
+        '@id': 'https://printon24.in/scan#page',
+        url: 'https://printon24.in/scan',
+        name: 'Scan Print Shop QR Code or Enter Shop Code | printOn24',
+        description: 'Scan a print shop QR code with your camera, pick it from the gallery or type the shop code, and connect to start uploading documents to print.',
+        inLanguage: 'en-IN',
+        isPartOf: { '@id': 'https://printon24.in/#website' },
+        publisher: { '@id': 'https://printon24.in/#org' }
+      },
+      {
+        '@type': 'BreadcrumbList',
+        itemListElement: [
+          { '@type': 'ListItem', position: 1, name: 'Home', item: 'https://printon24.in/' },
+          { '@type': 'ListItem', position: 2, name: 'Scan and Connect', item: 'https://printon24.in/scan' }
+        ]
+      },
+      {
+        '@type': 'HowTo',
+        name: 'How to connect to a print shop with a QR code',
+        step: scanConnectionSteps.map(name => ({ '@type': 'HowToStep', name }))
+      },
+      {
+        '@type': 'WebApplication',
+        name: 'printOn24 Scan and Connect',
+        applicationCategory: 'BusinessApplication',
+        operatingSystem: 'Web, Android, iOS',
+        featureList: ['Live camera QR scanner', 'Choose QR from gallery', 'Enter shop code or name', 'Quick Terminals', 'Verified Terminal details'],
+        publisher: { '@id': 'https://printon24.in/#org' }
+      },
+      {
+        '@type': 'FAQPage',
+        mainEntity: scanFaqs.map(([name, text]) => ({ '@type': 'Question', name, acceptedAnswer: { '@type': 'Answer', text } }))
+      }
+    ]
+  };
+
+  useEffect(() => {
+    if (!isPublicScanRoute) return;
+
+    const title = 'Scan Print Shop QR Code or Enter Shop Code | printOn24';
+    const description = 'Scan a print shop QR code with your camera, pick it from the gallery or type the shop code, and connect to start uploading documents to print.';
+    const setMeta = (selector: string, attributes: Record<string, string>, content: string) => {
+      let element = document.head.querySelector(selector) as HTMLMetaElement | null;
+      if (!element) {
+        element = document.createElement('meta');
+        Object.entries(attributes).forEach(([name, value]) => element?.setAttribute(name, value));
+        document.head.appendChild(element);
+      }
+      element.setAttribute('content', content);
+    };
+
+    document.title = title;
+    setMeta('meta[name="description"]', { name: 'description' }, description);
+    setMeta('meta[name="author"]', { name: 'author' }, 'printOn24');
+    setMeta('meta[name="robots"]', { name: 'robots' }, hasScanCode ? 'noindex, follow' : 'index, follow, max-image-preview:large, max-snippet:-1');
+    setMeta('meta[property="og:type"]', { property: 'og:type' }, 'website');
+    setMeta('meta[property="og:site_name"]', { property: 'og:site_name' }, 'printOn24');
+    setMeta('meta[property="og:title"]', { property: 'og:title' }, 'Scan a Print Shop QR Code and Connect | printOn24');
+    setMeta('meta[property="og:description"]', { property: 'og:description' }, 'Scan the shop QR, choose it from your gallery or enter the shop code to connect and print.');
+    setMeta('meta[property="og:url"]', { property: 'og:url' }, 'https://printon24.in/scan');
+    setMeta('meta[property="og:image"]', { property: 'og:image' }, 'https://printon24.in/icons/printon24-512.png');
+    setMeta('meta[property="og:image:alt"]', { property: 'og:image:alt' }, 'printOn24 QR scanner and shop code screen');
+    setMeta('meta[name="twitter:card"]', { name: 'twitter:card' }, 'summary_large_image');
+    setMeta('meta[name="twitter:title"]', { name: 'twitter:title' }, 'Scan a Print Shop QR Code and Connect | printOn24');
+    setMeta('meta[name="twitter:description"]', { name: 'twitter:description' }, 'Scan, pick from gallery or type the shop code to connect to a verified print shop.');
+    setMeta('meta[name="twitter:image"]', { name: 'twitter:image' }, 'https://printon24.in/icons/printon24-512.png');
+    setMeta('meta[name="twitter:image:alt"]', { name: 'twitter:image:alt' }, 'printOn24 QR scanner and shop code screen');
+
+    let canonical = document.head.querySelector('link[rel="canonical"]') as HTMLLinkElement | null;
+    if (!canonical) {
+      canonical = document.createElement('link');
+      canonical.setAttribute('rel', 'canonical');
+      document.head.appendChild(canonical);
+    }
+    canonical.setAttribute('href', 'https://printon24.in/scan');
+
+    const schemaId = 'scan-page-jsonld';
+    document.head.querySelector(`#${schemaId}`)?.remove();
+    if (!hasScanCode) {
+      const schemaScript = document.createElement('script');
+      schemaScript.id = schemaId;
+      schemaScript.type = 'application/ld+json';
+      schemaScript.textContent = JSON.stringify(scanSchema);
+      document.head.appendChild(schemaScript);
+    }
+  }, [hasScanCode, isPublicScanRoute]);
+
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (suggestionsRef.current && !suggestionsRef.current.contains(event.target as Node)) {
@@ -75,26 +213,26 @@ export const ScanView: React.FC<ScanViewProps> = ({ onProceedToUpload }) => {
   const searchSuggestions = React.useMemo(() => {
     const query = manualCode.trim().toLowerCase();
     if (!query) return [];
-    return enterprises.filter(ent =>
+    return enterprises.filter(ent => isShopOnline(ent.id) && (
       ent.name.toLowerCase().includes(query) ||
       ent.terminalCode.toLowerCase().includes(query) ||
       ent.shortCode.toLowerCase().includes(query) ||
       (ent.address && ent.address.toLowerCase().includes(query)) ||
       (ent.city && ent.city.toLowerCase().includes(query))
-    );
-  }, [manualCode, enterprises]);
+    ));
+  }, [manualCode, enterprises, isShopOnline]);
 
   const filteredDirectoryShops = React.useMemo(() => {
     const query = directorySearch.trim().toLowerCase();
-    if (!query) return enterprises;
-    return enterprises.filter(ent =>
+    if (!query) return enterprises.filter(ent => isShopOnline(ent.id));
+    return enterprises.filter(ent => isShopOnline(ent.id) && (
       ent.name.toLowerCase().includes(query) ||
       ent.terminalCode.toLowerCase().includes(query) ||
       ent.shortCode.toLowerCase().includes(query) ||
       (ent.address && ent.address.toLowerCase().includes(query)) ||
       (ent.city && ent.city.toLowerCase().includes(query))
-    );
-  }, [directorySearch, enterprises]);
+    ));
+  }, [directorySearch, enterprises, isShopOnline]);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -689,7 +827,7 @@ export const ScanView: React.FC<ScanViewProps> = ({ onProceedToUpload }) => {
         {orders.length > 0 && (
           <div className="pt-2 border-t border-slate-100 flex items-center gap-1.5 flex-wrap text-xs">
             <span className="text-slate-400 font-medium text-[11px]">Quick Terminals:</span>
-            {enterprises.filter(e => orders.some(o => o.enterpriseId === e.id)).slice(0, 3).map(ent => (
+            {enterprises.filter(e => isShopOnline(e.id) && orders.some(o => o.enterpriseId === e.id)).slice(0, 3).map(ent => (
               <button
                 key={ent.id}
                 type="button"
@@ -809,6 +947,72 @@ export const ScanView: React.FC<ScanViewProps> = ({ onProceedToUpload }) => {
             Scan the QR stand at the shop or type the terminal code above to connect and configure your prints.
           </p>
         </div>
+      )}
+      {isPublicScanRoute && (
+        <section className="sr-only" aria-labelledby="scan-seo-title">
+          <div className="max-w-4xl">
+            <p className="text-xs font-black uppercase tracking-[0.18em] text-[#FF1300]">printOn24 Scan and Connect</p>
+            <h1 id="scan-seo-title" className="mt-2 text-3xl font-black text-slate-900 font-heading">Scan a Print Shop QR Code and Connect in Seconds</h1>
+            <p className="mt-3 text-sm leading-7 text-slate-600">Every active printOn24 partner shop has a QR code and a unique shop code. Scan the QR with your camera, choose a QR image from your gallery, or enter the shop code or name. Once connected, upload your documents and send the order to that shop.</p>
+            <div className="mt-4 flex flex-wrap gap-3 text-sm font-bold">
+              <a className="rounded-full bg-[#FF1300] px-4 py-2 text-white" href="#scan-qr">Start Scanner</a>
+              <a className="rounded-full border border-red-200 px-4 py-2 text-[#FF1300]" href="#enter-code">Enter Shop Code</a>
+              <a className="rounded-full border border-slate-200 px-4 py-2 text-slate-700" href="/">printOn24 Home</a>
+            </div>
+          </div>
+
+          <section className="mt-8" aria-labelledby="connect-heading">
+            <h2 id="connect-heading" className="text-2xl font-black text-slate-900 font-heading">How to Connect to a Print Shop on printOn24</h2>
+            <p className="mt-3 text-sm leading-7 text-slate-700">To connect, find the shop QR, start the scanner or choose another connection method, confirm the shop details, and then upload your documents. The connected shop is the destination for your next print order.</p>
+            <ol className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-5">
+              {scanConnectionSteps.map((step, index) => <li key={step} className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-700"><strong>Step {index + 1}</strong><span className="mt-2 block">{step}</span></li>)}
+            </ol>
+          </section>
+
+          <section id="scan-qr" className="mt-8 grid gap-6 lg:grid-cols-2">
+            <div>
+              <h2 className="text-2xl font-black text-slate-900 font-heading">Live Counter Scanner</h2>
+              <p className="mt-3 text-sm leading-7 text-slate-700">Live Counter Scanner is a real-time camera QR scanner. It starts in Camera is Paused state until you tap Start Scanner. Allow camera access, aim at the Shop Stand QR, and use the camera switch button when you need the front or back camera.</p>
+            </div>
+            <div>
+              <h2 className="text-2xl font-black text-slate-900 font-heading">Choose From Gallery</h2>
+              <p className="mt-3 text-sm leading-7 text-slate-700">If you have a QR screenshot or photo, tap Choose From Gallery and select the saved image. The scanner reads the QR from that image and then validates the connected shop.</p>
+            </div>
+          </section>
+
+          <section id="enter-code" className="mt-8">
+            <h2 className="text-2xl font-black text-slate-900 font-heading">Enter Code Manually</h2>
+            <p className="mt-3 text-sm leading-7 text-slate-700">Enter Code Manually is the fallback when you do not want to use the camera. Type the shop code or shop name and tap Fetch and Connect. Search Shop looks up active partner shops by name, while Quick Terminals provide one-tap codes for shops available in your account.</p>
+            <div className="mt-4 overflow-x-auto rounded-2xl border border-slate-200">
+              <table className="w-full min-w-[620px] text-left text-sm"><thead className="bg-slate-50 text-slate-900"><tr><th className="p-3 font-bold">Connection method</th><th className="p-3 font-bold">Best for</th><th className="p-3 font-bold">What to do</th></tr></thead><tbody className="text-slate-700"><tr className="border-t"><td className="p-3">Scan with camera</td><td className="p-3">At the print shop</td><td className="p-3">Tap Start Scanner and aim at the QR</td></tr><tr className="border-t"><td className="p-3">Choose from gallery</td><td className="p-3">Saved QR image or screenshot</td><td className="p-3">Tap Choose From Gallery</td></tr><tr className="border-t"><td className="p-3">Enter code or name</td><td className="p-3">No camera or remote order</td><td className="p-3">Type the code and tap Fetch and Connect</td></tr><tr className="border-t"><td className="p-3">Quick Terminals</td><td className="p-3">Returning customers</td><td className="p-3">Tap an available shop-code button</td></tr></tbody></table>
+            </div>
+          </section>
+
+          <section id="connected-shop" className="mt-8">
+            <h2 className="text-2xl font-black text-slate-900 font-heading">Connected Printing Partner</h2>
+            <p className="mt-3 text-sm leading-7 text-slate-700">After Fetch and Connect succeeds, the Connected Printing Partner card shows the available shop name, address, phone, Terminal ID, services and black and white and colour rates. The Verified Terminal label identifies an approved active printOn24 partner.</p>
+            <div className="mt-4 grid gap-3">{publicPartnerShops.length === 0 ? <p className="text-sm text-slate-500">Active connected print shops will appear here when verified vendor data is available.</p> : publicPartnerShops.slice(0, 8).map(shop => <div key={shop.id} className="flex items-center gap-3 rounded-2xl border border-slate-200 p-3"><div className="min-w-0 flex-1"><h3 className="truncate font-bold text-slate-900">{shop.name}</h3><p className="text-xs text-slate-500">{shop.address || shop.city}</p><p className="mt-1 text-xs text-slate-600">Terminal ID: {shop.terminalCode}</p><p className="mt-1 text-xs text-slate-600">Services: {shop.services.length ? shop.services.join(', ') : 'Available services shown after connection'}</p></div><a className="shrink-0 rounded-full border border-slate-200 px-3 py-2 text-xs font-bold text-slate-700" href={`/shops/${shop.city.toLowerCase()}/${shopSlug(shop.name)}`}>View shop</a><a className="shrink-0 rounded-full bg-[#FF1300] px-3 py-2 text-xs font-bold text-white" href={`/upload?shop=${encodeURIComponent(shop.shopCode)}`}>Upload and print</a></div>)}</div>
+          </section>
+
+          <section id="camera-help" className="mt-8">
+            <h2 className="text-2xl font-black text-slate-900 font-heading">Camera and Privacy</h2>
+            <p className="mt-3 text-sm leading-7 text-slate-700">The scanner starts paused and requests camera access only when you start scanning. If permission is denied, open browser settings, try Chrome or Safari, or use Choose From Gallery or Enter Code Manually. Camera frames are processed in the browser to read the QR code and are not uploaded as part of the scan flow.</p>
+            <p className="mt-3 text-sm text-slate-600"><a className="font-bold text-[#FF1300] underline" href="/privacy-policy">Read the Privacy Policy</a> for platform privacy information.</p>
+          </section>
+
+          <section id="scan-faq" className="mt-8" aria-labelledby="scan-faq-heading">
+            <div className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <h2 id="scan-faq-heading" className="text-2xl font-black text-slate-900 font-heading">Scan Page FAQs</h2>
+              <div className="grid gap-4 text-sm text-slate-700">{scanFaqs.map(([question, answer]) => <details key={question} className="group rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm"><summary className="flex cursor-pointer list-none items-center justify-between gap-4 font-bold text-slate-900 marker:content-none"><span>{question}</span><span className="text-lg leading-none text-[#FF1300] transition-transform group-open:rotate-45" aria-hidden="true">+</span></summary><p className="mt-3 border-t border-slate-100 pt-3 leading-6 text-slate-700">{answer}</p></details>)}</div>
+            </div>
+          </section>
+
+          <section className="mt-8">
+            <h2 className="text-2xl font-black text-slate-900 font-heading">Related Pages</h2>
+            <div className="mt-3 flex flex-wrap gap-3 text-sm font-bold"><a className="text-[#FF1300] underline" href="/upload">Upload and print</a><a className="text-[#FF1300] underline" href="/shops">Find a print shop</a><a className="text-[#FF1300] underline" href="/privacy-policy">Privacy Policy</a></div>
+            <p className="mt-4 text-xs text-slate-500">Last updated: 29 October 2026</p>
+          </section>
+        </section>
       )}
       {/* How to Scan Help Dialog */}
       <Dialog open={showHowToScanModal} onOpenChange={setShowHowToScanModal}>

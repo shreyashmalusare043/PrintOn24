@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Phone, Mail, MapPin, Clock, MessageCircle, HelpCircle, Send } from 'lucide-react';
 import { toast } from 'sonner';
 import { submitContactMessage } from '../../services/api';
 import { usePrintPerfect } from '../../contexts/PrintPerfectContext';
+import { contactFaqs } from '../../content/contactContent';
 
 interface ContactUsViewProps {
   onBackToHome: () => void;
@@ -16,6 +17,13 @@ export const ContactUsView: React.FC<ContactUsViewProps> = ({ onBackToHome }) =>
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    document.title = 'Contact printOn24 Support';
+    let robots = document.head.querySelector('meta[name="robots"]') as HTMLMetaElement | null;
+    if (!robots) { robots = document.createElement('meta'); robots.name = 'robots'; document.head.appendChild(robots); }
+    robots.content = 'noindex, nofollow';
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -97,7 +105,7 @@ export const ContactUsView: React.FC<ContactUsViewProps> = ({ onBackToHome }) =>
                 required
                 value={name}
                 onChange={e => setName(e.target.value)}
-                placeholder="Shreyash Malusare"
+                placeholder="Your Name"
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:border-[#FF1300] outline-none"
               />
             </div>
@@ -108,7 +116,7 @@ export const ContactUsView: React.FC<ContactUsViewProps> = ({ onBackToHome }) =>
                 required
                 value={email}
                 onChange={e => setEmail(e.target.value)}
-                placeholder="name@student.college.edu"
+                placeholder="Enter Your Email"
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:border-[#FF1300] outline-none"
               />
             </div>
@@ -161,6 +169,10 @@ export const ContactUsView: React.FC<ContactUsViewProps> = ({ onBackToHome }) =>
         </h2>
         <p className="text-xs md:text-sm text-slate-600 leading-relaxed">{"printOn24 HR-SAC office 205, Katrang, Khopoli, Maharashtra 410203"}</p>
       </div>
+      <section className="hidden md:block bg-white rounded-3xl p-6 md:p-8 border border-slate-100 shadow-xs" aria-labelledby="contact-faq-heading">
+        <h2 id="contact-faq-heading" className="text-xl font-extrabold text-slate-900 font-heading">Contact FAQs</h2>
+        <div className="mt-4 space-y-3">{contactFaqs.map(([question, answer]) => <details key={question} className="group rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"><summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-sm font-bold text-slate-900 marker:content-none"><span>{question}</span><span className="text-lg text-[#FF1300] transition-transform group-open:rotate-45" aria-hidden="true">+</span></summary><p className="mt-3 border-t border-slate-200 pt-3 text-sm leading-6 text-slate-600">{answer}</p></details>)}</div>
+      </section>
     </div>
   );
 };

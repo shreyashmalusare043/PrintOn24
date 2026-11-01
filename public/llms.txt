@@ -1,0 +1,30 @@
+# printOn24
+
+> Online printing platform in Pune, India. Upload documents and print at active partner print shops; collect with a pickup token.
+
+## Key pages
+
+- [Home](https://printon24.in/)
+- [Upload and Print](https://printon24.in/upload)
+- [Scan and Connect](https://printon24.in/scan)
+- [Print reports](https://printon24.in/features/print-reports)
+- [Profile, membership and nearby print shops](https://printon24.in/features/profile-and-membership)
+- [About printOn24](https://printon24.in/about)
+- [Careers at printOn24](https://printon24.in/careers)
+- [Advertise with printOn24](https://printon24.in/advertise)
+- [Contact printOn24](https://printon24.in/contact)
+- [Feedback and suggestions](https://printon24.in/feedback)
+- [How to Use printOn24](https://printon24.in/how-it-works)
+- [Partner print shops](https://printon24.in/shops)
+- [Privacy Policy](https://printon24.in/privacy-policy)
+- [Terms and Conditions](https://printon24.in/terms-and-conditions)
+- [Settings and Preferences Guide](https://printon24.in/help/settings-and-preferences)
+
+## Brand facts
+
+printOn24 connects customers with partner print and xerox shops. Customers can upload PDF, Word, Excel, PowerPoint and image files, configure supported paper size and print options, see a live estimate, and collect completed orders with a pickup token. Uploaded documents are automatically deleted within 12 hours.
+The public Profile and Membership feature page explains shop-specific Print Club memberships, Auto-Applied Default Print Preferences and nearby partner-shop discovery within 1 KM or 5 KM. It uses example information only; personal profile data is private.
+printOn24 accepts Feedback, Suggestion and Bug Report submissions; ratings are private and are not published as reviews.
+How to Use printOn24: scan a shop QR code or enter its shop code, upload documents, set print configuration, select an enabled payment method, tap Go For Print, then collect prints with the digital receipt and pickup token.
+Privacy summary: active uploaded documents have a maximum 12-hour operational lifecycle before scheduled deletion; backup and provider deletion cycles may differ. Personal data is not sold.
+The public Settings and Preferences Guide explains notification, password, guest-mode and consent controls without exposing personal account or consent status.

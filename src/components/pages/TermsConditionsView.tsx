@@ -20,6 +20,10 @@ export const TermsConditionsView: React.FC<TermsConditionsViewProps> = ({ onBack
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    document.title = 'Terms and Conditions | printOn24';
+    let robots = document.head.querySelector('meta[name="robots"]') as HTMLMetaElement | null;
+    if (!robots) { robots = document.createElement('meta'); robots.name = 'robots'; document.head.appendChild(robots); }
+    robots.content = 'noindex, follow, noarchive';
     fetchPlatformTerms().then((data) => {
       if (data) {
         setTermsData(data);

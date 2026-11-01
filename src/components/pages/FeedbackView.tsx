@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { MessageSquare, Star, Send, CheckCircle2 } from 'lucide-react';
 import { usePrintPerfect } from '../../contexts/PrintPerfectContext';
 import type { UserFeedback } from '../../types/printperfect';
+import { feedbackFaqs } from '../../content/feedbackContent';
 
 interface FeedbackViewProps {
   onBackToHome: () => void;
@@ -14,6 +15,13 @@ export const FeedbackView: React.FC<FeedbackViewProps> = ({ onBackToHome }) => {
   const [subject, setSubject] = useState('');
   const [details, setDetails] = useState('');
   const [rating, setRating] = useState(5);
+
+  useEffect(() => {
+    document.title = 'Feedback and Suggestions - printOn24';
+    let robots = document.head.querySelector('meta[name="robots"]') as HTMLMetaElement | null;
+    if (!robots) { robots = document.createElement('meta'); robots.name = 'robots'; document.head.appendChild(robots); }
+    robots.content = 'noindex, nofollow, noarchive';
+  }, []);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -137,6 +145,10 @@ export const FeedbackView: React.FC<FeedbackViewProps> = ({ onBackToHome }) => {
           </div>
         </div>
       </div>
+      <section className="hidden md:block rounded-2xl border border-slate-200 bg-slate-50 p-5" aria-labelledby="feedback-faq-heading">
+        <h2 id="feedback-faq-heading" className="text-xl font-extrabold text-slate-900 font-heading">Feedback FAQs</h2>
+        <div className="mt-4 grid gap-3">{feedbackFaqs.map(([question, answer]) => <details key={question} className="group rounded-xl border border-slate-200 bg-white px-4 py-3"><summary className="flex cursor-pointer list-none items-center justify-between gap-4 font-bold"><span>{question}</span><span className="text-lg text-[#FF1300] transition-transform group-open:rotate-45" aria-hidden="true">+</span></summary><p className="mt-3 border-t border-slate-100 pt-3 text-sm leading-6 text-slate-600">{answer}</p></details>)}</div>
+      </section>
     </div>
   );
 };

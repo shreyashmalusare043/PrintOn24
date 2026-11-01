@@ -1,0 +1,24 @@
+User-agent: *
+Allow: /
+Allow: /features/
+Allow: /about
+Allow: /careers
+Allow: /advertise
+Allow: /contact
+Allow: /feedback
+Allow: /how-it-works
+Allow: /download
+Allow: /privacy-policy
+Allow: /terms-and-conditions
+Allow: /help/
+Disallow: /downloads/
+
+Disallow: /checkout
+Disallow: /receipt
+Disallow: /profile
+Disallow: /settings
+Disallow: /notifications
+Disallow: /app/
+Disallow: /api/
+
+Sitemap: https://printon24.in/sitemap.xml

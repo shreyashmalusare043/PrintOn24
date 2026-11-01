@@ -3,6 +3,7 @@ import { Briefcase, MapPin, Sparkles, Send, CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { getCareers, submitCareerApplication, type CareerItem } from '../../services/api';
 import { usePrintPerfect } from '../../contexts/PrintPerfectContext';
+import { careersFaqs } from '../../content/careersContent';
 
 interface CareersViewProps {
   onBackToHome: () => void;
@@ -64,6 +65,13 @@ export const CareersView: React.FC<CareersViewProps> = ({ onBackToHome }) => {
 
   const openings = careerList.length > 0 ? careerList : defaultOpenings;
 
+  useEffect(() => {
+    document.title = 'Careers - printOn24';
+    let robots = document.head.querySelector('meta[name="robots"]') as HTMLMetaElement | null;
+    if (!robots) { robots = document.createElement('meta'); robots.name = 'robots'; document.head.appendChild(robots); }
+    robots.content = 'noindex, follow';
+  }, []);
+
   const handleApply = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!applicantName || !applicantEmail) {
@@ -101,7 +109,7 @@ export const CareersView: React.FC<CareersViewProps> = ({ onBackToHome }) => {
   return (
     <div className="w-full max-w-full px-2 md:px-6 space-y-6 pb-20 select-none">
       <div>
-        <h1 className="text-2xl font-extrabold text-slate-900 font-heading">{"Careers Oppeoturnity"}</h1>
+        <h1 className="text-2xl font-extrabold text-slate-900 font-heading">Career Opportunities</h1>
         <p className="text-xs text-slate-500 mt-1">{"Join our fast-growing tech and revolutionize printing"}</p>
       </div>
       <div className="space-y-3">
@@ -145,6 +153,20 @@ export const CareersView: React.FC<CareersViewProps> = ({ onBackToHome }) => {
           </div>
         ))}
       </div>
+      <section className="hidden md:block rounded-3xl border border-slate-200 bg-white p-5 shadow-xs" aria-labelledby="careers-faq-heading">
+        <h2 id="careers-faq-heading" className="text-xl font-extrabold text-slate-900 font-heading">Careers FAQs</h2>
+        <div className="mt-4 grid gap-3">
+          {careersFaqs.map(([question, answer]) => (
+            <details key={question} className="group rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-sm font-bold text-slate-900 marker:content-none">
+                <span>{question}</span>
+                <span className="text-lg text-[#FF1300] transition-transform group-open:rotate-45" aria-hidden="true">+</span>
+              </summary>
+              <p className="mt-3 border-t border-slate-200 pt-3 text-sm leading-6 text-slate-600">{answer}</p>
+            </details>
+          ))}
+        </div>
+      </section>
       {/* Application Dialog */}
       {selectedRole && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">

@@ -20,8 +20,9 @@ import {
 import { usePrintPerfect } from '../../contexts/PrintPerfectContext';
 import type { PrintOrder } from '../../types/printperfect';
 import { DEFAULT_GUEST_PROFILE_PHOTO } from '../../types/printperfect';
-import { fetchHomeBanners, type HomeBannerItem } from '../../services/api';
+import { fetchHomeBanners, fetchPublicPrintShops, shopSlug, type HomeBannerItem, type PublicPrintShop } from '../../services/api';
 import { supabase } from '../../db/supabase';
+import PageMeta from '../common/PageMeta';
 
 interface DesktopHomeViewProps {
   onSelectEnterprise: (enterpriseId: string) => void;
@@ -52,6 +53,7 @@ export const DesktopHomeView: React.FC<DesktopHomeViewProps> = ({
   const [activeSlide, setActiveSlide] = useState(0);
   const [showAllOrders, setShowAllOrders] = useState(false);
   const [homeBanners, setHomeBanners] = useState<HomeBannerItem[]>([]);
+  const [publicVendors, setPublicVendors] = useState<PublicPrintShop[]>([]);
 
   useEffect(() => {
     let isMounted = true;
@@ -72,6 +74,14 @@ export const DesktopHomeView: React.FC<DesktopHomeViewProps> = ({
       isMounted = false;
       supabase.removeChannel(channel);
     };
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    fetchPublicPrintShops()
+      .then(shops => mounted && setPublicVendors(shops))
+      .catch(error => console.error('Unable to load public print shops:', error));
+    return () => { mounted = false; };
   }, []);
 
   // 1. Dynamic Carousel Slides from database
@@ -153,9 +163,99 @@ export const DesktopHomeView: React.FC<DesktopHomeViewProps> = ({
   };
 
   const currentSlide = slides[activeSlide] || slides[0];
+  const eligibleVendorList = publicVendors.slice(0, 6);
+
+  const homeFaqs = [
+    ['What is printOn24?', 'printOn24 is an online printing platform. You upload a document, choose a nearby partner print shop, set your print options and collect the printout using a pickup token.'],
+    ['How do I print a document online with printOn24?', 'Find your print shop, upload your file, choose paper size, colour, sides, copies and page range, place the order, then show your token at the shop to collect the printout.'],
+    ['Do I need to scan a QR code?', 'No. You can open a shop link or search the shop by name. Scanning the shop QR code or entering the shop code also works and selects the same shop.'],
+    ['Which file types can I print?', 'PDF, Word, Excel, PowerPoint and image files. You can add more than one file to an order.'],
+    ['How do I pay?', 'You pay using the methods enabled by the print shop you choose, for example Pay on Counter when you collect your prints. Available methods are shown at checkout.'],
+    ['How much does printing cost?', 'The price depends on the shop rates, paper size, colour or black and white, and the number of pages and copies. A live estimated total is shown before you send the order.'],
+    ['Can I print only some pages?', 'Yes. Choose All Pages, Selected Pages or a Custom Range. You can also fit 1, 2 or 4 pages on one sheet.'],
+    ['Can I print on both sides of the paper?', 'Yes. Choose Single Side or Back to Back in the print settings.'],
+    ['Is my document safe on printOn24?', 'Uploaded documents are kept in encrypted cloud storage and are automatically deleted within 12 hours, as described in the Privacy Policy.'],
+    ['How do I know when my print is ready?', 'You get a notification when the shop completes the print and the order status changes from Queued to Completed. Show your token at the counter to collect.'],
+    ['Can I get a receipt for my order?', 'Yes. Each order has a digital receipt with a barcode and token. You can download, copy, share or re-print it.'],
+    ['Can I find print shops near me?', 'Yes. printOn24 shows active partner shops near you with address, timings, services and rates, and you can connect to a shop with one tap.'],
+    ['Can my print shop join printOn24?', 'Yes. Print and xerox shops can register as partners to receive online orders and get a shop code, QR code and shop page.'],
+    ['How can I contact printOn24 support?', 'Call +91 9284289782 or email info@hrsactech.in. Support is available 7 days a week.']
+  ];
+
+  const homeSeoSchema = {
+    '@context': 'https://schema.org',
+    '@graph': [
+      {
+        '@type': 'Organization',
+        '@id': 'https://printon24.in/#org',
+        name: 'printOn24',
+        legalName: 'printOn24 Technology Pvt. Ltd.',
+        url: 'https://printon24.in/',
+        logo: 'https://printon24.in/icons/printon24-512.png',
+        email: 'info@hrsactech.in',
+        telephone: '+91-9284289782',
+        description: 'printOn24 is an Indian online printing platform that connects customers with partner print and xerox shops. Users upload documents, choose print settings and collect printouts with a pickup token.',
+        address: {
+          '@type': 'PostalAddress',
+          addressLocality: 'Pune',
+          addressRegion: 'Maharashtra',
+          addressCountry: 'IN'
+        },
+        areaServed: {
+          '@type': 'City',
+          name: 'Pune'
+        },
+        knowsAbout: ['online printing', 'document printing', 'student printing', 'colour printing', 'black and white printing', 'nearby print shops']
+      },
+      {
+        '@type': 'WebSite',
+        '@id': 'https://printon24.in/#website',
+        url: 'https://printon24.in/',
+        name: 'printOn24',
+        inLanguage: 'en-IN',
+        publisher: { '@id': 'https://printon24.in/#org' }
+      },
+      {
+        '@type': 'WebApplication',
+        '@id': 'https://printon24.in/#application',
+        name: 'printOn24',
+        applicationCategory: 'BusinessApplication',
+        operatingSystem: 'Web, Android, iOS',
+        publisher: { '@id': 'https://printon24.in/#org' }
+      },
+      {
+        '@type': 'HowTo',
+        name: 'How to print a document online with printOn24',
+        step: ['Find or scan your print shop', 'Upload your documents', 'Choose print settings', 'Check the price and place the order', 'Collect your printout with a token'].map(name => ({ '@type': 'HowToStep', name }))
+      },
+      {
+        '@type': 'FAQPage',
+        mainEntity: homeFaqs.map(([name, text]) => ({ '@type': 'Question', name, acceptedAnswer: { '@type': 'Answer', text } }))
+      }
+    ]
+  };
 
   return (
-    <div className="space-y-6 pb-16 px-4 md:px-8 w-full select-none font-sans">
+    <>
+      <PageMeta
+        title="printOn24 - Online Printing at Nearby Print Shops in Pune"
+        description="Upload your document, choose a nearby partner print shop, set colour, copies and page range, and collect your printout with a token. No queues."
+        robots="index, follow, max-image-preview:large, max-snippet:-1"
+        canonical="https://printon24.in/"
+        ogTitle="printOn24 - Print Online. Collect at a Nearby Print Shop."
+        ogDescription="Upload, configure and send your print order to a verified print shop near you. Collect with a token."
+        ogUrl="https://printon24.in/"
+        ogImage="https://printon24.in/icons/printon24-512.png"
+        ogImageAlt="printOn24 online printing at nearby print shops"
+        ogType="website"
+        ogSiteName="printOn24"
+        twitterTitle="printOn24 - Print Online. Collect at a Nearby Print Shop."
+        twitterDescription="Upload, configure and send your print order to a verified print shop near you."
+        twitterImage="https://printon24.in/icons/printon24-512.png"
+        twitterCard="summary_large_image"
+        jsonLd={homeSeoSchema}
+      />
+      <div className="space-y-6 pb-16 px-4 md:px-8 w-full select-none font-sans">
       {/* ======================================================== */}
       {/* 1. Top Row: Greeting Banner + Premium Member Card (Image 1) */}
       {/* ======================================================== */}
@@ -542,6 +642,90 @@ export const DesktopHomeView: React.FC<DesktopHomeViewProps> = ({
           </div>
         )}
       </div>
+
+      {/* Desktop-only SEO / AEO / GEO section. Mobile remains unchanged. */}
+      <div className="hidden md:block bg-white rounded-3xl border border-slate-200/90 p-6 shadow-xs">
+        <div className="sr-only">
+          <p className="text-xs font-black uppercase tracking-[0.18em] text-[#FF1300]">printOn24 online printing in Pune</p>
+          <h1 className="mt-2 text-3xl font-black text-slate-900 font-heading">Print Online. Collect at a Nearby Print Shop.</h1>
+          <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-600">
+            printOn24 is an online printing platform that lets you upload PDFs, Word files, Excel sheets,
+            PowerPoint decks and images, set paper size, colour, copies, page range and double-side options,
+            and send the job to a verified shop nearby. You receive a pickup token and digital receipt, then collect
+            the printout without waiting in a queue.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-3 text-sm font-bold"><a className="rounded-full bg-[#FF1300] px-4 py-2 text-white" href="/upload">Upload and Print Now</a><a className="rounded-full border border-red-200 px-4 py-2 text-[#FF1300]" href="/shops">Find a Print Shop</a></div>
+        </div>
+
+        <section id="what-is-printon24" className="sr-only">
+          <h2 className="text-2xl font-black text-slate-900 font-heading">What is printOn24?</h2>
+          <p className="mt-3 text-sm leading-7 text-slate-700">printOn24 is an online printing platform that connects customers with partner printing and xerox shops. Upload a file from your phone or laptop, set paper size, colour, sides, copies and page range, and send the order directly to the shop you choose. The shop prints it and you collect it with a token.</p>
+        </section>
+
+        <section id="how-it-works" className="sr-only">
+          <h2 className="text-2xl font-black text-slate-900 font-heading">How printOn24 Works</h2>
+          <ol className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-5">{['Find or scan your print shop', 'Upload your documents', 'Choose your print settings', 'Check the price and place the order', 'Collect your printout with a token'].map((step, index) => <li key={step} className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-700"><strong>Step {index + 1}</strong><span className="mt-2 block">{step}.</span></li>)}</ol>
+        </section>
+
+        <section id="features" className="sr-only">
+          <h2 className="text-2xl font-black text-slate-900 font-heading">Features of printOn24</h2>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 text-sm text-slate-700">{['Complete print configuration for A4, A3 and A2', 'PDF, Word, Excel, PowerPoint and image files', 'Colour, black and white, single side or back to back', 'Selected pages, custom range and 1, 2 or 4 pages per sheet', 'Live price estimate, pickup token and digital receipt', 'Nearby partner shops within 1 km or 5 km'].map(feature => <div key={feature} className="rounded-2xl border border-slate-200 p-4">{feature}</div>)}</div>
+        </section>
+
+        <div className="grid gap-6">
+          <div className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <h2 className="text-2xl font-black text-slate-900 font-heading">Frequently asked questions</h2>
+            <div className="grid gap-4 text-sm text-slate-700">
+              {homeFaqs.map(([question, answer]) => (
+                <details key={question} className="group rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-4 font-bold text-slate-900 marker:content-none">
+                    <span>{question}</span>
+                    <span className="text-lg leading-none text-[#FF1300] transition-transform group-open:rotate-45" aria-hidden="true">+</span>
+                  </summary>
+                  <p className="mt-3 border-t border-slate-100 pt-3 leading-6 text-slate-700">{answer}</p>
+                </details>
+              ))}
+            </div>
+          </div>
+
+          <div className="sr-only">
+            <h3 className="text-lg font-black text-slate-900 font-heading">Partner print shops in Pune</h3>
+            {eligibleVendorList.length === 0 ? (
+              <p className="text-sm text-slate-500">Active partner shops will appear here when verified vendor data is available.</p>
+            ) : (
+              <div className="grid gap-3">
+                {eligibleVendorList.map(ent => (
+                  <div key={ent.id} className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3">
+                    <div className="w-16 h-16 rounded-xl border border-slate-200 bg-slate-50 p-2 shrink-0">
+                      <img
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(ent.qrCodeData || `https://printon24.in/upload?shop=${ent.shopCode}`)}`}
+                        alt={`${ent.name} QR code`}
+                        className="h-full w-full object-contain"
+                      />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <h4 className="truncate text-sm font-black text-slate-900 font-heading">{ent.name}</h4>
+                        <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">Verified</span>
+                      </div>
+                      <p className="mt-1 text-[11px] text-slate-500">{ent.address}</p>
+                      <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-slate-600">
+                        <span>Code: {ent.shopCode}</span>
+                        <span>•</span>
+                        <span>{ent.services.slice(0, 2).join(' · ')}</span>
+                      </div>
+                    </div>
+                    <a href={`/shops/${ent.city.toLowerCase()}/${shopSlug(ent.name)}`} className="shrink-0 rounded-full border border-red-200 px-3 py-2 text-[11px] font-bold text-[#FF1300]">View shop</a>
+                    <a href={`/upload?shop=${encodeURIComponent(ent.shopCode)}`} className="shrink-0 rounded-full bg-[#FF1300] px-3 py-2 text-[11px] font-bold text-white shadow-sm transition hover:bg-[#E01100]">Order now</a>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+        <p className="sr-only">Uploaded documents are stored in encrypted cloud storage and automatically deleted within 12 hours. Payment methods depend on the selected shop. <a href="/privacy-policy">Read the Privacy Policy</a>.</p>
+      </div>
     </div>
+    </>
   );
 };

@@ -1,47 +1,48 @@
-import React, { useState, useRef, useEffect } from 'react';
 import {
-  UploadCloud,
-  FolderOpen,
-  FileText,
-  Trash2,
-  RefreshCw,
-  Settings2,
-  File,
-  Layers,
-  Copy,
-  Smartphone,
-  Maximize2,
-  Grid,
-  CheckCircle2,
+  AlertCircle,
   ArrowRight,
+  Check,
+  CheckCircle2,
+  ChevronRight,
+  Copy,
+  Crown,
+  ExternalLink,
+  Eye,
+  File,
+  FilePlus,
+  FileText,
+  FolderOpen,
+  Grid,
   HardDrive,
   ImageIcon,
-  Wand2,
-  Plus,
+  Layers,
+  Maximize2,
   Minus,
-  Sparkles,
-  Crown,
-  User,
-  ShieldCheck,
-  Check,
-  X,
-  FilePlus,
-  AlertCircle,
-  Table,
+  Plus,
   Presentation,
-  Eye,
-  ExternalLink,
-  ChevronRight
+  RefreshCw,
+  Settings2,
+  ShieldCheck,
+  Smartphone,
+  Sparkles,
+  Table,
+  Trash2,
+  UploadCloud,
+  User,
+  Wand2,
+  X
 } from 'lucide-react';
-import { usePrintPerfect } from '../../contexts/PrintPerfectContext';
-import { ImageEditorModal } from './ImageEditorModal';
-import type { CustomPageRangeRule, ImageEditingState, UploadedDoc } from '../../types/printperfect';
+import React, { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { fetchUploadPageAds, getShopAvailablePaperSizes, getShopPaperPricingDetails, type UploadPageAdItem } from '../../services/api';
-import { formatFullName } from '../../utils/nameFormat';
+import { usePrintPerfect } from '../../contexts/PrintPerfectContext';
 import { supabase } from '../../db/supabase';
-import { UniformAlertModal } from '../common/UniformAlertModal';
 import { getPrintModeEligibility, type PrintSides, type PrintType } from '../../lib/printEligibility';
+import { fetchPublicPrintShops, fetchUploadPageAds, getShopAvailablePaperSizes, getShopPaperPricingDetails, shopSlug, type PublicPrintShop, type UploadPageAdItem } from '../../services/api';
+import type { CustomPageRangeRule, ImageEditingState, UploadedDoc } from '../../types/printperfect';
+import { formatFullName } from '../../utils/nameFormat';
+import { getPowerPointSlideCount } from '../../utils/powerPointSlideCount';
+import { UniformAlertModal } from '../common/UniformAlertModal';
+import { ImageEditorModal } from './ImageEditorModal';
 
 interface UploadConfigurationViewProps {
   onProceedToCheckout: () => void;
@@ -50,11 +51,32 @@ interface UploadConfigurationViewProps {
   onSharedFilesHandled?: () => void;
 }
 
+const uploadFaqs = [
+  ['Which files can I upload to print?', 'You can upload PDF, Word, Excel, PowerPoint and image files. Select several files at once or add them one by one.'],
+  ['Can I upload more than one file in a single order?', 'Yes. Use Add Another File. Each file appears in the queued list with its own pages, settings and price.'],
+  ['How do I upload a document on printOn24?', 'Choose your print shop, drag and drop the file or tap Choose Files, wait for the upload to finish, set your print options and tap Send for Print and Pay.'],
+  ['How is the print price calculated?', 'The price depends on the shop rates, paper size, colour or black and white, total pages and copies. Estimate Total updates live as you change options.'],
+  ['Is the estimate the final price?', 'Estimate Total is calculated live from your selections and the shop rates. The final total is shown before you send the order.'],
+  ['Can I print only some pages?', 'Yes. In Page Range choose All Pages, Selected Pages or Custom Range and enter the pages you need.'],
+  ['What is Pages Per Sheet?', 'Pages Per Sheet places more than one page on each sheet. Choose 1-in-1, 2-in-1 or 4-in-1 in Print Configuration.'],
+  ['What is the difference between Single Side and Back to Back?', 'Single Side prints on one side of each sheet. Back to Back prints on both sides, using fewer sheets.'],
+  ['Can I print in colour and black and white?', 'Yes. Choose Colour or Black and White under Print Type. The price changes with your choice.'],
+  ['Can I print in landscape?', 'Yes. Choose Landscape in Layout. Portrait is the default for most documents.'],
+  ['Can I print photos or make a collage?', 'Yes. Use Image Editor to place several images on an A4 page with Auto Grid, crop, rotate and brightness tools.'],
+  ['What happens after I tap Send for Print and Pay?', 'Your order goes to the selected shop. You choose a payment method, get a pickup token and digital receipt, and collect the printout at the shop.'],
+  ['Is my uploaded document safe?', 'Files are stored in encrypted cloud storage and are automatically deleted within 12 hours.'],
+  ['Do I need to scan a QR code to upload?', 'No. A shop link or a search by name selects the shop for you. Scanning the QR code or typing the shop code works too.']
+];
+
 export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = ({
   onProceedToCheckout,
   sharedFiles,
   onSharedFilesHandled
 }) => {
+  const uploadPathParams = new URLSearchParams(window.location.search);
+  const isCleanPublicUploadRoute = window.location.pathname === '/upload' && !uploadPathParams.has('shop') && !uploadPathParams.has('shopId') && !uploadPathParams.has('terminal') && !uploadPathParams.has('qr');
+  const hasShopDeepLink = !isCleanPublicUploadRoute && (uploadPathParams.has('shop') || uploadPathParams.has('shopId') || uploadPathParams.has('terminal') || uploadPathParams.has('qr'));
+  const [publicShops, setPublicShops] = useState<PublicPrintShop[]>([]);
   const neutralSuccessToastStyle: React.CSSProperties = {
     background: '#fff',
     color: '#111827',
@@ -66,6 +88,8 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
     updateUser,
     selectedEnterprise,
     hasExplicitlySelectedEnterprise,
+    isShopAvailabilityLoading,
+    isShopOnline,
     currentDoc,
     setCurrentDoc,
     uploadedDocs,
@@ -88,7 +112,20 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
     getDocPrice,
     clearUploadSession
   } = usePrintPerfect();
+
+  useEffect(() => {
+    if (!isCleanPublicUploadRoute) return;
+    let mounted = true;
+    fetchPublicPrintShops().then(shops => mounted && setPublicShops(shops)).catch(error => console.error('Unable to load public upload shop links:', error));
+    return () => { mounted = false; };
+  }, [isCleanPublicUploadRoute]);
   const [selectedConfigTargetIds, setSelectedConfigTargetIds] = useState<string[]>([]);
+  const isSelectedShopChecking = hasExplicitlySelectedEnterprise && isShopAvailabilityLoading;
+  const isSelectedShopOffline =
+    hasExplicitlySelectedEnterprise &&
+    !isShopAvailabilityLoading &&
+    !isShopOnline(selectedEnterprise.id);
+  const isUploadBlocked = isSelectedShopChecking || isSelectedShopOffline;
   const updatePrintConfig = (updates: Parameters<typeof updatePrintConfigContext>[0]) => {
     updatePrintConfigContext(updates);
   };
@@ -363,16 +400,14 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
 
     // PPT / PPTX: detect slide count and default to Landscape
     if (file.name.match(/\.pptx?$/i) || file.type.includes('presentation')) {
-      let pages = 1;
+      let pages = 0;
       try {
-        const buffer = await file.arrayBuffer();
-        const text = new TextDecoder('latin1').decode(buffer);
-        const slideMatches = text.match(/ppt\/slides\/slide\d+\.xml/g);
-        if (slideMatches && slideMatches.length > 0) {
-          const uniqueSlides = new Set(slideMatches).size;
-          if (uniqueSlides > 0) pages = uniqueSlides;
+        if (/\.pptx$/i.test(file.name) || file.type.includes('presentation')) {
+          pages = await getPowerPointSlideCount(file);
         }
-      } catch {}
+      } catch (error) {
+        console.error('PowerPoint slide count detection failed:', error);
+      }
       return { pages, orientation: 'Landscape' };
     }
 
@@ -392,6 +427,15 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
 
   // Real-time Upload Runner with Secure Storage Upload & 12h Expiry
   const startUploadSimulation = async (files: FileList | File[]) => {
+    if (isSelectedShopChecking) {
+      toast.error('Checking PrintHub availability. Please try again.');
+      return;
+    }
+    if (isSelectedShopOffline) {
+      toast.error('PrintHub Is Offline');
+      return;
+    }
+
     const fileList = Array.from(files);
     if (fileList.length === 0) return;
 
@@ -492,11 +536,12 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
       lastProcessedSharedFilesRef.current = null;
       return;
     }
+    if (isSelectedShopChecking) return;
     if (lastProcessedSharedFilesRef.current === sharedFiles) return;
 
     lastProcessedSharedFilesRef.current = sharedFiles;
     void startUploadSimulation(sharedFiles).finally(() => onSharedFilesHandled?.());
-  }, [sharedFiles]);
+  }, [sharedFiles, isSelectedShopChecking]);
 
   const handleFileDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -525,6 +570,14 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
   const handleProceedClick = () => {
     if (!hasExplicitlySelectedEnterprise) {
       toast.error('Select/Connect Printing Shop First');
+      return;
+    }
+    if (isSelectedShopChecking) {
+      toast.error('Checking PrintHub availability. Please try again.');
+      return;
+    }
+    if (isSelectedShopOffline) {
+      toast.error('PrintHub Is Offline');
       return;
     }
     const allDocs = uploadedDocs.length > 0 ? uploadedDocs : (currentDoc ? [currentDoc] : []);
@@ -744,6 +797,103 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
       ? isPrintModeSelectable(currentPrintType as PrintType, side)
       : isPrintModeSelectable('Color', side) || isPrintModeSelectable('Black & White', side);
 
+  const uploadSchema = {
+    '@context': 'https://schema.org',
+    '@graph': [
+      {
+        '@type': 'WebPage',
+        '@id': 'https://printon24.in/upload#page',
+        url: 'https://printon24.in/upload',
+        name: 'Upload and Print Online | printOn24',
+        description: 'Upload PDF, Word, Excel, PowerPoint or images, choose print options, see a live price and send your order to a nearby print shop.',
+        inLanguage: 'en-IN',
+        isPartOf: { '@id': 'https://printon24.in/#website' },
+        publisher: { '@id': 'https://printon24.in/#org' }
+      },
+      {
+        '@type': 'BreadcrumbList',
+        itemListElement: [
+          { '@type': 'ListItem', position: 1, name: 'Home', item: 'https://printon24.in/' },
+          { '@type': 'ListItem', position: 2, name: 'Upload and Print', item: 'https://printon24.in/upload' }
+        ]
+      },
+      {
+        '@type': 'HowTo',
+        name: 'How to upload and print a document online',
+        step: ['Choose your print shop', 'Upload your files', 'Set print options', 'Check the live price', 'Send for print and pay'].map(name => ({ '@type': 'HowToStep', name }))
+      },
+      {
+        '@type': 'WebApplication',
+        name: 'printOn24 Upload and Print',
+        applicationCategory: 'BusinessApplication',
+        operatingSystem: 'Web, Android, iOS',
+        featureList: ['PDF, Word, Excel, PowerPoint and image upload', 'Multiple files per order', 'Print configuration and live estimate', 'Image Editor for A4 layouts'],
+        publisher: { '@id': 'https://printon24.in/#org' }
+      },
+      {
+        '@type': 'FAQPage',
+        mainEntity: uploadFaqs.map(([name, text]) => ({ '@type': 'Question', name, acceptedAnswer: { '@type': 'Answer', text } }))
+      }
+    ]
+  };
+
+  // The app has a static index.html head for the Home route. Keep the Upload
+  // route metadata authoritative when this view is opened directly or through
+  // a vendor deep link, without changing the existing uploader UI.
+  useEffect(() => {
+    if (!isCleanPublicUploadRoute && !hasShopDeepLink) return;
+
+    const title = 'Upload and Print Online - PDF, Word, Excel, PPT, Images | printOn24';
+    const description = 'Upload PDF, Word, Excel, PPT or images, choose paper size, colour, copies and pages, see the live price and send your print order to a nearby shop.';
+    const robots = isCleanPublicUploadRoute
+      ? 'index, follow, max-image-preview:large, max-snippet:-1'
+      : 'noindex, follow';
+    const setMeta = (selector: string, attributes: Record<string, string>, content: string) => {
+      let element = document.head.querySelector(selector) as HTMLMetaElement | null;
+      if (!element) {
+        element = document.createElement('meta');
+        Object.entries(attributes).forEach(([name, value]) => element?.setAttribute(name, value));
+        document.head.appendChild(element);
+      }
+      element.setAttribute('content', content);
+    };
+
+    document.title = title;
+    setMeta('meta[name="description"]', { name: 'description' }, description);
+    setMeta('meta[name="robots"]', { name: 'robots' }, robots);
+    setMeta('meta[property="og:title"]', { property: 'og:title' }, 'Upload and Print Your Documents Online | printOn24');
+    setMeta('meta[property="og:description"]', { property: 'og:description' }, 'Drag and drop your files, set print options and see the price before you pay.');
+    setMeta('meta[property="og:url"]', { property: 'og:url' }, 'https://printon24.in/upload');
+    setMeta('meta[property="og:type"]', { property: 'og:type' }, 'website');
+    setMeta('meta[property="og:site_name"]', { property: 'og:site_name' }, 'printOn24');
+    setMeta('meta[property="og:image"]', { property: 'og:image' }, 'https://printon24.in/icons/printon24-512.png');
+    setMeta('meta[property="og:image:alt"]', { property: 'og:image:alt' }, 'printOn24 upload and print screen');
+    setMeta('meta[name="twitter:card"]', { name: 'twitter:card' }, 'summary_large_image');
+    setMeta('meta[name="twitter:title"]', { name: 'twitter:title' }, 'Upload and Print Your Documents Online | printOn24');
+    setMeta('meta[name="twitter:description"]', { name: 'twitter:description' }, 'Upload files, set options, see the live price and send to a nearby print shop.');
+    setMeta('meta[name="twitter:image"]', { name: 'twitter:image' }, 'https://printon24.in/icons/printon24-512.png');
+    setMeta('meta[name="twitter:image:alt"]', { name: 'twitter:image:alt' }, 'printOn24 upload and print screen');
+
+    let canonical = document.head.querySelector('link[rel="canonical"]') as HTMLLinkElement | null;
+    if (!canonical) {
+      canonical = document.createElement('link');
+      canonical.setAttribute('rel', 'canonical');
+      document.head.appendChild(canonical);
+    }
+    canonical.setAttribute('href', 'https://printon24.in/upload');
+
+    const schemaId = 'upload-page-jsonld';
+    const existingSchema = document.head.querySelector(`#${schemaId}`);
+    existingSchema?.remove();
+    if (isCleanPublicUploadRoute) {
+      const schemaScript = document.createElement('script');
+      schemaScript.id = schemaId;
+      schemaScript.type = 'application/ld+json';
+      schemaScript.textContent = JSON.stringify(uploadSchema);
+      document.head.appendChild(schemaScript);
+    }
+  }, [hasShopDeepLink, isCleanPublicUploadRoute]);
+
   return (
     <div className="w-full max-w-7xl mx-auto px-4 lg:px-6 pb-28 select-none font-sans">
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
@@ -821,6 +971,7 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
               multiple
               accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.webp"
               onChange={handleFileInputChange}
+              disabled={isUploadBlocked}
               className="hidden"
             />
 
@@ -832,13 +983,19 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
               Drag & Drop Files or Click Choose Files
             </h3>
             <p className="text-[11px] text-slate-500 mt-0.5 max-w-sm mx-auto">{"Select multiple files or add 1-by-1 • Supports PDF, Word, Excel, PPT & Images"}</p>
+            {isUploadBlocked && (
+              <p className="mt-2 text-xs font-bold text-red-600" role="status">
+                {isSelectedShopChecking ? 'Checking PrintHub...' : 'PrintHub Is Offline'}
+              </p>
+            )}
 
             {/* Choose File Button */}
             <div className="mt-3 flex items-center justify-center gap-2">
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-[#FF1300] hover:bg-[#E01100] active:scale-95 text-white text-xs font-bold shadow-md shadow-red-500/25 transition-all font-heading"
+                disabled={isUploadBlocked}
+                className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-[#FF1300] hover:bg-[#E01100] active:scale-95 text-white text-xs font-bold shadow-md shadow-red-500/25 transition-all font-heading disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <FolderOpen className="w-4 h-4" />
                 <span>{uploadedDocs.length > 0 ? 'Add Another File' : 'Choose Files'}</span>
@@ -896,7 +1053,8 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-full bg-red-50 px-3 py-1.5 text-xs font-bold text-[#FF1300] shadow-xs transition-colors hover:bg-red-100"
+                  disabled={isUploadBlocked}
+                  className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-full bg-red-50 px-3 py-1.5 text-xs font-bold text-[#FF1300] shadow-xs transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   <span>{"Add Another File"}</span>
@@ -1002,7 +1160,7 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                         <div className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px]">
                           <span className="text-slate-500">
                             {doc.conversionStatus === 'failed'
-                              ? 'Conversion failed'
+                              ? 'Page preview unavailable'
                               : (doc.fileType === 'XLS' || doc.fileType === 'XLSX') && doc.conversionStatus !== 'converted'
                                 ? 'Choose sheet & Set'
                                 : `${doc.totalPages} ${doc.totalPages === 1 ? 'Page' : 'Pages'}`}
@@ -1031,8 +1189,22 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                         {!isDocImg && (
                           <button
                             type="button"
-                            onClick={() => {
-                              const targetUrl = doc.convertedPdfUrl || doc.previewUrl || doc.storageUrl;
+                            onClick={async () => {
+                              const isOfficeDoc = ['DOC', 'DOCX', 'XLS', 'XLSX', 'PPT', 'PPTX'].includes(doc.fileType);
+                              const needsPreviewRefresh =
+                                isOfficeDoc && doc.pageCountMatchesPreview === false;
+                              let targetUrl = needsPreviewRefresh
+                                ? ''
+                                : doc.convertedPdfUrl ||
+                                  (isOfficeDoc && doc.conversionStatus !== 'converted'
+                                    ? ''
+                                    : doc.previewUrl || doc.storageUrl);
+                              if (!targetUrl && isOfficeDoc) {
+                                targetUrl = await reconvertDocument(doc.id, {
+                                  selectedSheet: doc.selectedSheet,
+                                  scaling: doc.excelScaling
+                                }) || '';
+                              }
                               if (targetUrl) {
                                 const activeConfig = isCurrent ? printConfig : (doc.printConfig || printConfig);
                                 const activePayload = {
@@ -1133,7 +1305,7 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                   </span>
                   <span className="text-[10px] text-slate-500 font-semibold">
                     {currentDoc.fileType} • {currentDoc.conversionStatus === 'failed'
-                      ? 'Conversion failed'
+                      ? 'Page preview unavailable'
                       : (currentDoc.fileType === 'XLS' || currentDoc.fileType === 'XLSX') && currentDoc.conversionStatus !== 'converted'
                         ? 'Choose sheet & Set'
                         : `${currentDoc.totalPages} ${currentDoc.totalPages === 1 ? 'Page' : 'Pages'}`}
@@ -1209,9 +1381,8 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
           </div>
 
           {/* Excel Specific Print Configuration: Sheet Selection & 4 Scaling Options */}
-          {(currentDoc?.fileType === 'XLS' ||
-            currentDoc?.fileType === 'XLSX' ||
-            Boolean(currentDoc?.fileName?.match(/\.(xlsx?|csv)$/i))) && (
+          {(currentDoc?.fileType === 'XLSX' ||
+            Boolean(currentDoc?.fileName?.match(/\.(xlsx|csv)$/i))) && (
             <div className="bg-white rounded-2xl p-3.5 border-2 border-red-100 shadow-xs space-y-3 animate-in fade-in">
               <div className="flex items-center justify-between border-b border-red-50 pb-2">
                 <div className="flex items-center gap-2">
@@ -1222,7 +1393,7 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                 </div>
                 {isReconverting && (
                   <span className="text-[10px] font-bold text-[#FF1300] flex items-center gap-1 animate-pulse">
-                    <RefreshCw className="w-3 h-3 animate-spin" /> Updating PDF...
+                    <RefreshCw className="w-3 h-3 animate-spin" /> Updating page preview...
                   </span>
                 )}
               </div>
@@ -1305,7 +1476,7 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                 }}
                 className="w-full rounded-xl bg-[#FF1300] px-4 py-2.5 text-xs font-black text-white shadow-sm transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {isReconverting ? 'Setting Excel options...' : 'Set & Convert to PDF'}
+                {isReconverting ? 'Updating page preview...' : 'Apply Sheet & Scaling'}
               </button>
             </div>
           )}
@@ -2119,6 +2290,71 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
             </div>
           </div>
         </div>
+      )}
+      {(
+        <section className="hidden md:block mt-10 rounded-3xl border border-slate-200 bg-white p-6 shadow-xs" aria-labelledby="upload-seo-title">
+          <div className="sr-only">
+            <p className="text-xs font-black uppercase tracking-[0.18em] text-[#FF1300]">printOn24 Upload and Print</p>
+            <h1 id="upload-seo-title" className="mt-2 text-3xl font-black text-slate-900 font-heading">Upload and Print Your Documents Online</h1>
+            <p className="mt-3 text-sm leading-7 text-slate-600">Upload your PDF, Word, Excel, PowerPoint or image files, choose how you want them printed and see the live price before you send the order. Your order goes to the selected partner print shop, where you collect it with a pickup token.</p>
+            <p className="mt-3 text-sm text-slate-600"><a className="font-bold text-[#FF1300] underline" href="/">Return to printOn24 Home</a> to choose a nearby print shop first.</p>
+          </div>
+
+          <div id="how-to-upload" className="sr-only">
+            <h2 className="text-2xl font-black text-slate-900 font-heading">How to Upload and Print on printOn24</h2>
+            <ol className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-5">
+              {['Choose your print shop', 'Upload your files', 'Set your print options', 'Check the live price', 'Send for Print and Pay'].map((step, index) => <li key={step} className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-700"><strong>Step {index + 1}</strong><span className="mt-2 block">{step}.</span></li>)}
+            </ol>
+          </div>
+
+          <div className="sr-only">
+            <section id="file-types">
+              <h2 className="text-2xl font-black text-slate-900 font-heading">Supported File Types</h2>
+              <p className="mt-3 text-sm leading-7 text-slate-700">printOn24 supports PDF, Word, Excel, PowerPoint and image files. Select several files at once or use Add Another File to build one order with multiple documents. Each file appears in Queued Print Documents with its page count, settings and price.</p>
+            </section>
+            <section id="price">
+              <h2 className="text-2xl font-black text-slate-900 font-heading">Live Price Estimate</h2>
+              <p className="mt-3 text-sm leading-7 text-slate-700">Estimate Total is calculated live from the selected shop rates, paper size, colour or black and white, page range and copies. The final total is shown before you tap Send for Print and Pay.</p>
+            </section>
+          </div>
+
+          <section id="print-options" className="sr-only">
+            <h2 className="text-2xl font-black text-slate-900 font-heading">Print Configuration Options</h2>
+            <div className="mt-4 overflow-x-auto rounded-2xl border border-slate-200">
+              <table className="w-full min-w-[620px] text-left text-sm"><thead className="bg-slate-50 text-slate-900"><tr><th className="p-3 font-bold">Option</th><th className="p-3 font-bold">Choices</th><th className="p-3 font-bold">Why it matters</th></tr></thead><tbody className="text-slate-700"><tr className="border-t"><td className="p-3">Paper Size</td><td className="p-3">A4 and other sizes the shop offers</td><td className="p-3">Sets the paper and price</td></tr><tr className="border-t"><td className="p-3">Print Side</td><td className="p-3">Single Side, Back to Back</td><td className="p-3">Back to Back uses fewer sheets</td></tr><tr className="border-t"><td className="p-3">Print Type</td><td className="p-3">Colour, Black and White</td><td className="p-3">Changes the shop rate</td></tr><tr className="border-t"><td className="p-3">Layout</td><td className="p-3">Portrait, Landscape</td><td className="p-3">Matches document orientation</td></tr><tr className="border-t"><td className="p-3">Page Range</td><td className="p-3">All Pages, Selected Pages, Custom Range</td><td className="p-3">Prints only what you need</td></tr><tr className="border-t"><td className="p-3">Pages Per Sheet</td><td className="p-3">1-in-1, 2-in-1, 4-in-1</td><td className="p-3">Places multiple pages on a sheet</td></tr></tbody></table>
+            </div>
+          </section>
+
+          <section id="image-editor" className="sr-only">
+            <h2 className="text-2xl font-black text-slate-900 font-heading">Image Editor for Photos and Collages</h2>
+            <p className="mt-3 text-sm leading-7 text-slate-700">Use Image Editor to place several images on an A4 canvas inside the Print Area. Auto Grid, crop, rotate, brightness, zoom, Center and Fit to Page help prepare a photo or ID layout before printing.</p>
+          </section>
+
+          <section id="upload-faq" className="mt-8">
+            <div className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <h2 className="text-2xl font-black text-slate-900 font-heading">Frequently asked questions</h2>
+              <div className="grid gap-4 text-sm text-slate-700">
+                {uploadFaqs.map(([question, answer]) => (
+                  <details key={question} className="group rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                    <summary className="flex cursor-pointer list-none items-center justify-between gap-4 font-bold text-slate-900 marker:content-none">
+                      <span>{question}</span>
+                      <span className="text-lg leading-none text-[#FF1300] transition-transform group-open:rotate-45" aria-hidden="true">+</span>
+                    </summary>
+                    <p className="mt-3 border-t border-slate-100 pt-3 leading-6 text-slate-700">{answer}</p>
+                  </details>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          <section className="sr-only">
+            <h2 className="text-2xl font-black text-slate-900 font-heading">Print Shops Near You</h2>
+            <p className="mt-2 text-sm text-slate-600">The public Upload and Print page reads active connected shop data from PrintOn24. Shop code and location details are shown only when available from the database.</p>
+            <div className="mt-4 grid gap-3">{publicShops.length === 0 ? <p className="text-sm text-slate-500">No active connected print shops are available right now.</p> : publicShops.slice(0, 8).map(shop => <div key={shop.id} className="flex items-center gap-3 rounded-2xl border border-slate-200 p-3"><div className="min-w-0 flex-1"><h3 className="truncate font-bold text-slate-900">{shop.name}</h3><p className="text-xs text-slate-500">{shop.address}</p><p className="mt-1 text-xs text-slate-600">Shop code: {shop.shopCode}</p></div><a className="shrink-0 rounded-full bg-[#FF1300] px-3 py-2 text-xs font-bold text-white" href={`/shops/${shop.city.toLowerCase()}/${shopSlug(shop.name)}`}>View shop</a><a className="shrink-0 rounded-full border border-red-200 px-3 py-2 text-xs font-bold text-[#FF1300]" href={`/upload?shop=${encodeURIComponent(shop.shopCode)}`}>Order now</a></div>)}</div>
+          </section>
+
+          <p className="sr-only">Uploaded files are kept in encrypted cloud storage and automatically deleted within 12 hours. Payment methods depend on the selected shop. Sponsored offers are labelled Sponsored and do not change the print price.</p>
+        </section>
       )}
       {/* 6. Image Editor Modal */}
       {isImageEditorOpen && (

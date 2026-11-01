@@ -1,17 +1,17 @@
-import React, { useState, useEffect, useRef } from 'react';
 import {
-  Search,
   CheckCircle2,
-  Star,
-  MapPin,
   ChevronRight,
+  MapPin,
   Mic,
-  MicOff
+  MicOff,
+  Search,
+  Star
 } from 'lucide-react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
+import React, { useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import { usePrintPerfect } from '../../contexts/PrintPerfectContext';
 import type { PrintEnterprise } from '../../types/printperfect';
-import { toast } from 'sonner';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
 
 interface AllEnterprisesModalProps {
   isOpen: boolean;
@@ -24,14 +24,15 @@ export const AllEnterprisesModal: React.FC<AllEnterprisesModalProps> = ({
   onClose,
   onSelectEnterprise
 }) => {
-  const { enterprises, selectEnterprise, user } = usePrintPerfect();
+  const { enterprises, selectEnterprise, user, isShopOnline, isShopAvailabilityLoading } = usePrintPerfect();
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('All');
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
 
   // Auto-suggestion loop in search placeholder
-  const shopNames = enterprises.map(e => e.name);
+  const onlineEnterprises = enterprises.filter(enterprise => isShopOnline(enterprise.id));
+  const shopNames = onlineEnterprises.map(e => e.name);
   const [loopIndex, setLoopIndex] = useState(0);
 
   useEffect(() => {
@@ -94,7 +95,7 @@ export const AllEnterprisesModal: React.FC<AllEnterprisesModalProps> = ({
 
   const categories = ['All', 'Digital Printing', 'Copier & Laser', 'Blueprint & Offset'];
 
-  const filtered = enterprises.filter(e => {
+  const filtered = onlineEnterprises.filter(e => {
     const matchesSearch =
       e.name.toLowerCase().includes(search.toLowerCase()) ||
       e.address.toLowerCase().includes(search.toLowerCase()) ||
@@ -169,7 +170,11 @@ export const AllEnterprisesModal: React.FC<AllEnterprisesModalProps> = ({
           <div className="space-y-2 pr-0.5">
             {filtered.length === 0 ? (
               <div className="py-8 text-center text-slate-400 text-xs">
-                No printing shops found matching "{search}"
+                {isShopAvailabilityLoading
+                  ? 'Checking PrintHub availability...'
+                  : search
+                    ? `No online PrintHubs found matching "${search}"`
+                    : 'No online PrintHubs are available right now.'}
               </div>
             ) : (
               filtered.map(enterprise => {

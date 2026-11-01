@@ -1,50 +1,51 @@
-import React, { useState, useRef, useEffect } from 'react';
 import {
-  User,
-  Settings,
-  Sliders,
-  CreditCard,
-  ShieldCheck,
-  CheckCircle2,
-  ChevronRight,
-  ChevronLeft,
-  Edit2,
-  MapPin,
-  Compass,
-  Star,
-  Check,
-  Building2,
-  Phone,
-  Mail,
-  Camera,
-  Navigation,
-  Layers,
-  ZoomIn,
-  ZoomOut,
-  Radio,
-  Wifi,
-  Sparkles,
-  LogOut,
-  Crosshair,
-  Save,
-  RefreshCw,
   AlertCircle,
-  RotateCw,
-  RotateCcw,
-  Scissors,
+  Building2,
+  Camera,
+  Check,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Clock,
-  Lock,
+  Compass,
+  CreditCard,
+  Crosshair,
+  Edit2,
   Eye,
-  EyeOff
+  EyeOff,
+  Layers,
+  Lock,
+  LogOut,
+  Mail,
+  MapPin,
+  Navigation,
+  Phone,
+  Radio,
+  RefreshCw,
+  RotateCcw,
+  RotateCw,
+  Save,
+  Scissors,
+  Settings,
+  ShieldCheck,
+  Sliders,
+  Sparkles,
+  Star,
+  User,
+  Wifi,
+  ZoomIn,
+  ZoomOut
 } from 'lucide-react';
-import { formatFullName, sanitizeNameInputs } from '../../utils/nameFormat';
+import React, { useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import { usePrintPerfect } from '../../contexts/PrintPerfectContext';
 import { validatePasswordRules } from '../../lib/authSecurity';
 import type { PrintConfig } from '../../types/printperfect';
 import { DEFAULT_GUEST_PROFILE_PHOTO } from '../../types/printperfect';
-import { toast } from 'sonner';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
+import { formatFullName, sanitizeNameInputs } from '../../utils/nameFormat';
 import { RealMapboxMap } from '../common/RealMapboxMap';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
+import { profileFaqs } from '../../content/profileFeatureContent';
 
 interface ProfileViewProps {
   onOpenSettings?: () => void;
@@ -67,6 +68,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     saveDefaultPrintConfig,
     printConfig,
     nearbyShops,
+    isShopOnline,
     selectEnterprise,
     logout,
     openAuthModal,
@@ -74,6 +76,13 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   } = usePrintPerfect();
 
   const [activeCardIndex, setActiveCardIndex] = useState(0);
+
+  useEffect(() => {
+    document.title = 'Profile and Membership - printOn24';
+    let robots = document.head.querySelector('meta[name="robots"]') as HTMLMetaElement | null;
+    if (!robots) { robots = document.createElement('meta'); robots.name = 'robots'; document.head.appendChild(robots); }
+    robots.content = 'noindex, nofollow, noarchive';
+  }, []);
 
   // Filter only purchased active memberships
   const userMembershipsList =
@@ -198,12 +207,16 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         longitude: shopCoords[0]
       };
     })
-    .filter(shop => shop.distanceKm <= radiusFilter)
+    .filter(shop => shop.distanceKm <= radiusFilter && isShopOnline(shop.id))
     .sort((a, b) => a.distanceKm - b.distanceKm);
 
   // Dynamic shop card is hidden until user explicitly clicks a shop pin on the map
   const [selectedNearbyShop, setSelectedNearbyShop] = useState<typeof nearbyShops[0] | null>(null);
   const [mapZoom, setMapZoom] = useState(1);
+  const activeNearbyShop =
+    selectedNearbyShop && isShopOnline(selectedNearbyShop.id)
+      ? selectedNearbyShop
+      : filteredNearbyShops[0] || null;
 
   // In-page Avatar Editor State (zoom in/out, rotation, crop adjustment)
   const [isAvatarEditorOpen, setIsAvatarEditorOpen] = useState(false);
@@ -915,8 +928,8 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         />
 
         {/* Dynamic Connected Printing Partner Card: displays nearest shop or clicked shop */}
-        {(selectedNearbyShop || (filteredNearbyShops.length > 0 ? filteredNearbyShops[0] : null)) && (() => {
-          const activeShop = selectedNearbyShop || filteredNearbyShops[0];
+        {activeNearbyShop && (() => {
+          const activeShop = activeNearbyShop;
           return (
             <div className="p-4 rounded-2xl bg-white border border-red-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4 animate-in fade-in-50 duration-200">
               <div className="min-w-0 flex-1 space-y-1.5">
@@ -960,6 +973,20 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           );
         })()}
       </div>
+      <section className="hidden md:block bg-white rounded-3xl p-5 border border-slate-200/90 shadow-sm space-y-4" aria-labelledby="profile-faq-heading">
+        <h3 id="profile-faq-heading" className="text-xl font-extrabold text-slate-900 font-heading">Profile & Membership FAQs</h3>
+        <div className="grid gap-3">
+          {profileFaqs.map(([question, answer]) => (
+            <details key={question} className="group rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 font-bold text-sm marker:content-none">
+                <span>{question}</span>
+                <span className="text-lg text-[#FF1300] transition-transform group-open:rotate-45" aria-hidden="true">+</span>
+              </summary>
+              <p className="mt-3 border-t border-slate-200 pt-3 text-xs leading-6 text-slate-700">{answer}</p>
+            </details>
+          ))}
+        </div>
+      </section>
       {/* Edit User Profile Dialog (Name, Surname, Email ID, Contact Number, Address only) */}
       <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
         <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-md bg-white rounded-3xl p-6">

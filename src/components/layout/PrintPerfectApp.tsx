@@ -82,8 +82,15 @@ const PrintPerfectAppContent: React.FC = () => {
     authModalSubtitle
   } = usePrintPerfect();
 
-  const [activeTab, setActiveTab] = useState<TabType>('home');
-  const [currentView, setCurrentView] = useState<ActiveView>('home');
+  const startsOnUploadRoute = /^\/upload\/?$/i.test(window.location.pathname);
+  const startsOnScanRoute = window.location.pathname === '/scan';
+  const startsOnPrivateReportRoute = window.location.pathname.startsWith('/app/report');
+  const startsOnPrivatePrivacyRoute = /^\/app\/privacy\/?$/i.test(window.location.pathname);
+  const startsOnPrivateTermsRoute = /^\/app\/(?:terms|terms-and-conditions)\/?$/i.test(window.location.pathname);
+  const startsOnPrivateSettingsRoute = /^\/app\/settings\/?$/i.test(window.location.pathname);
+  const initialView: ActiveView = startsOnUploadRoute ? 'upload' : startsOnScanRoute ? 'scan' : startsOnPrivateReportRoute ? 'report' : startsOnPrivatePrivacyRoute ? 'privacy_policy' : startsOnPrivateTermsRoute ? 'terms_conditions' : startsOnPrivateSettingsRoute ? 'settings' : 'home';
+  const [activeTab, setActiveTab] = useState<TabType>(startsOnUploadRoute ? 'upload' : startsOnPrivateReportRoute ? 'report' : 'home');
+  const [currentView, setCurrentView] = useState<ActiveView>(initialView);
   const [isAppDownloadSuggestionOpen, setIsAppDownloadSuggestionOpen] = useState(false);
   const isWeb = !Capacitor.isNativePlatform();
 

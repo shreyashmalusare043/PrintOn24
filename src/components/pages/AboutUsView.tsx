@@ -16,6 +16,8 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { fetchCMSContent } from '../../services/api';
+import PageMeta from '../common/PageMeta';
+import { aboutFaqs } from '../../content/aboutUsContent';
 
 interface AboutUsViewProps {
   onBackToHome: () => void;
@@ -43,7 +45,9 @@ export const AboutUsView: React.FC<AboutUsViewProps> = ({
   const heroSubtitle = mainItem?.subtitle || 'printOn24 bridges the gap between everyday document creators and neighborhood reprography centers, transforming physical print shops into high-speed digital service hubs.';
 
   return (
-    <div className="w-full max-w-full px-2 md:px-6 space-y-6 pb-24 select-none">
+    <>
+      <PageMeta title="About printOn24 - Online Printing Platform for Local Print Shops" robots="noindex, follow" />
+      <div className="w-full max-w-full px-2 md:px-6 space-y-6 pb-24 select-none">
       {/* Top Navigation */}
       <div className="pt-2">
         <button
@@ -88,7 +92,7 @@ export const AboutUsView: React.FC<AboutUsViewProps> = ({
             printOn24 was conceived to eliminate the age-old frustrations of physical document printing — long queues, broken file formatting, WhatsApp chaos, USB virus risks, and awkward cash handling.
           </p>
           <p>
-            Our platform provides a smooth end-to-end workflow: customers scan a unique shop QR code from any smartphone or laptop, upload documents in any format (PDF, DOCX, XLSX, PPTX, JPG), customize print parameters (color mode, duplex, paper sizes, page ranges), make swift online or counter payments, and collect crisp physical prints within seconds.
+            Our platform provides an end-to-end workflow: customers scan a connected shop QR code from a smartphone or laptop, upload supported documents (PDF, DOCX, XLSX, PPTX, JPG), choose available print parameters and payment options, and collect physical prints with a pickup token.
           </p>
           <p>
             For printing businesses, printOn24 acts as an intelligent digital dispatcher. Incoming orders are instantly spooled to connected counter PCs and routed to the exact matching physical printer (B&W or Color, Single-Side or Duplex) without requiring the shopkeeper to manually open heavy desktop applications.
@@ -104,7 +108,7 @@ export const AboutUsView: React.FC<AboutUsViewProps> = ({
             <div className="space-y-1">
               <h4 className="text-xs font-bold text-slate-900 font-heading">QR-Based Instant Discovery</h4>
               <p className="text-[11px] text-slate-500 leading-relaxed">
-                Every partner store is assigned a tamper-proof dynamic QR code. Customers simply point their camera and begin uploading immediately.
+                Each connected partner store can have a secure shop QR code and shop code. Customers can scan the code to open that shop's print workflow.
               </p>
             </div>
           </div>
@@ -116,7 +120,7 @@ export const AboutUsView: React.FC<AboutUsViewProps> = ({
             <div className="space-y-1">
               <h4 className="text-xs font-bold text-slate-900 font-heading">Precision Print Engine</h4>
               <p className="text-[11px] text-slate-500 leading-relaxed">
-                Segment-level range control, orientation locking, paper thickness selection, and zero-reprint guarantees ensure print accuracy.
+                Page-range control, orientation and available paper options help customers review a print order before sending it.
               </p>
             </div>
           </div>
@@ -128,7 +132,7 @@ export const AboutUsView: React.FC<AboutUsViewProps> = ({
             <div className="space-y-1">
               <h4 className="text-xs font-bold text-slate-900 font-heading">Flexible Dual Payments</h4>
               <p className="text-[11px] text-slate-500 leading-relaxed">
-                Integrated Razorpay UPI / Card payments alongside traditional pay-at-counter cash modes give customers and shops ultimate flexibility.
+                Online payment methods may be available alongside pay-at-counter options, depending on the selected shop.
               </p>
             </div>
           </div>
@@ -175,11 +179,11 @@ export const AboutUsView: React.FC<AboutUsViewProps> = ({
               </li>
               <li className="flex items-start gap-2">
                 <span className="text-[#FF1300] font-bold mt-0.5">•</span>
-                <span>To provide students, professionals, and citizens with instantaneous access to dependable, high-quality printing within their own neighborhoods.</span>
+                <span>To provide students, professionals and citizens with access to dependable printing through connected neighbourhood shops.</span>
               </li>
               <li className="flex items-start gap-2">
                 <span className="text-[#FF1300] font-bold mt-0.5">•</span>
-                <span>To continuously innovate environmentally conscious, paper-optimized workflows that reduce print waste and foster community business growth.</span>
+                <span>To support paper-saving workflows such as double-side and multiple-pages-per-sheet printing where available.</span>
               </li>
             </ul>
           </div>
@@ -193,11 +197,11 @@ export const AboutUsView: React.FC<AboutUsViewProps> = ({
             <ul className="space-y-2 text-xs text-slate-600 leading-relaxed">
               <li className="flex items-start gap-2">
                 <span className="text-blue-600 font-bold mt-0.5">•</span>
-                <span>To build the country's most reliable, secure, and accessible interconnected digital printing infrastructure.</span>
+                <span>To build a reliable, secure and accessible network of connected print shops across India.</span>
               </li>
               <li className="flex items-start gap-2">
                 <span className="text-blue-600 font-bold mt-0.5">•</span>
-                <span>To turn every printing terminal into an automated, zero-latency cloud node capable of processing any document format in milliseconds.</span>
+                <span>To turn printing terminals into connected workflows that can handle common document formats.</span>
               </li>
               <li className="flex items-start gap-2">
                 <span className="text-blue-600 font-bold mt-0.5">•</span>
@@ -205,7 +209,7 @@ export const AboutUsView: React.FC<AboutUsViewProps> = ({
               </li>
               <li className="flex items-start gap-2">
                 <span className="text-blue-600 font-bold mt-0.5">•</span>
-                <span>To establish printOn24 as the undisputed benchmark for contactless, privacy-assured document handling across educational campuses, tech hubs, and commercial centers.</span>
+                <span>To become a trusted option for contactless and privacy-aware document handling across campuses, tech hubs and commercial centres.</span>
               </li>
             </ul>
           </div>
@@ -344,20 +348,36 @@ export const AboutUsView: React.FC<AboutUsViewProps> = ({
             <ul className="space-y-2 text-xs text-slate-600 leading-relaxed">
               <li className="flex items-start gap-2">
                 <CheckCircle2 className="w-3.5 h-3.5 text-[#0070BA] shrink-0 mt-0.5" />
-                <span><strong>Double Daily Throughput:</strong> Automate file opening, driver settings, and paper size mapping.</span>
+                <span><strong>Less manual work:</strong> Automate file opening, driver settings and available paper-size mapping.</span>
               </li>
               <li className="flex items-start gap-2">
                 <CheckCircle2 className="w-3.5 h-3.5 text-[#0070BA] shrink-0 mt-0.5" />
-                <span><strong>Zero Re-print Loss:</strong> Page-level tracking prevents accidental duplicate printing.</span>
+                <span><strong>Page-level tracking:</strong> Order details help reduce accidental duplicate printing.</span>
               </li>
               <li className="flex items-start gap-2">
                 <CheckCircle2 className="w-3.5 h-3.5 text-[#0070BA] shrink-0 mt-0.5" />
-                <span><strong>Multi-PC Multi-Printer Clustering:</strong> Balance load across all counter printers automatically.</span>
+                <span><strong>Connected printer workflow:</strong> Support dispatch across configured counter PCs and printers.</span>
               </li>
             </ul>
           </div>
         </div>
       </div>
+
+      <section className="hidden md:block bg-white rounded-3xl p-6 md:p-8 border border-slate-100 shadow-xs space-y-5" aria-labelledby="about-faq-title">
+        <div className="space-y-1">
+          <span className="text-[10px] font-extrabold text-[#FF1300] uppercase tracking-wider font-heading">Answer centre</span>
+          <h2 id="about-faq-title" className="text-lg md:text-xl font-black text-slate-900 font-heading">Frequently Asked Questions</h2>
+        </div>
+        <div className="grid gap-4 text-sm text-slate-700">
+          {aboutFaqs.map(([question, answer]) => (
+            <details key={question} className="group rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 font-bold text-slate-900 marker:content-none"><span>{question}</span><span className="text-lg leading-none text-[#FF1300] transition-transform group-open:rotate-45" aria-hidden="true">+</span></summary>
+              <p className="mt-3 border-t border-slate-200 pt-3 leading-6 text-slate-700">{answer}</p>
+            </details>
+          ))}
+        </div>
+      </section>
     </div>
+    </>
   );
 };

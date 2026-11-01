@@ -48,6 +48,8 @@ export const DesktopHeader: React.FC<DesktopHeaderProps> = ({
     enterprises,
     selectedEnterprise,
     hasExplicitlySelectedEnterprise,
+    isShopAvailabilityLoading,
+    isShopOnline,
     selectEnterprise,
     resetEnterpriseSelection,
     unreadNotifCount,
@@ -56,6 +58,7 @@ export const DesktopHeader: React.FC<DesktopHeaderProps> = ({
   } = usePrintPerfect();
 
   const [searchVal, setSearchVal] = useState('');
+  const onlineEnterprises = enterprises.filter(enterprise => isShopOnline(enterprise.id));
   const isWeb = !Capacitor.isNativePlatform();
   // User Requirement: "switch partenr print shop cha dropdown ahe tithe fisrt alwasy bu defoult madhe konich select karu nko fakt Select Enterprises cha show kar"
   const [hasManuallySelectedShop, setHasManuallySelectedShop] = useState(false);
@@ -125,7 +128,7 @@ export const DesktopHeader: React.FC<DesktopHeaderProps> = ({
             <div className="px-3 py-1.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider font-heading">
               Switch Partner Print Shop
             </div>
-            {enterprises.map(ent => {
+            {onlineEnterprises.map(ent => {
               const isSelected = hasExplicitlySelectedEnterprise && selectedEnterprise.id === ent.id;
               return (
                 <DropdownMenuItem
@@ -148,6 +151,11 @@ export const DesktopHeader: React.FC<DesktopHeaderProps> = ({
                 </DropdownMenuItem>
               );
             })}
+            {onlineEnterprises.length === 0 && (
+              <div className="px-3 py-2 text-xs text-slate-400">
+                {isShopAvailabilityLoading ? 'Checking PrintHub availability...' : 'No PrintHubs are online.'}
+              </div>
+            )}
 
             {/* Reset Option */}
             <DropdownMenuItem

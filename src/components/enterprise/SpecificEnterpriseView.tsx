@@ -1,42 +1,42 @@
-import React, { useState, useRef, useEffect } from 'react';
 import {
   ArrowLeft,
   Building2,
-  CheckCircle2,
-  MapPin,
-  Phone,
-  Star,
-  CreditCard,
-  Crown,
-  Upload,
   Calendar,
-  Filter,
-  FileText,
-  Printer,
+  Camera,
+  Check,
+  CheckCircle2,
   ChevronDown,
   ChevronUp,
-  Sparkles,
-  Info,
   Clock,
-  MessageSquare,
-  Plus,
-  Send,
-  User,
+  CreditCard,
+  Crown,
+  FileText,
+  Filter,
+  Info,
+  Loader2,
   Mail,
-  Camera,
-  X,
+  MapPin,
+  MessageSquare,
+  Phone,
+  Plus,
+  Printer,
+  Send,
   ShieldCheck,
-  Check,
-  Loader2
+  Sparkles,
+  Star,
+  Upload,
+  User,
+  X
 } from 'lucide-react';
-import { usePrintPerfect } from '../../contexts/PrintPerfectContext';
-import { getShopInitials } from '../../utils/shopInitials';
-import type { PrintOrder, MembershipPlan, ShopService, ShopReview } from '../../types/printperfect';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
-import { openRazorpayCheckout } from '../../services/razorpay';
+import React, { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { fetchApprovedShopFeedbacks, submitShopFeedback } from '../../services/api';
+import { usePrintPerfect } from '../../contexts/PrintPerfectContext';
 import { supabase } from '../../db/supabase';
+import { fetchApprovedShopFeedbacks, submitShopFeedback } from '../../services/api';
+import { openRazorpayCheckout } from '../../services/razorpay';
+import type { MembershipPlan, PrintOrder, ShopReview, ShopService } from '../../types/printperfect';
+import { getShopInitials } from '../../utils/shopInitials';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
 
 interface SpecificEnterpriseViewProps {
   onBack: () => void;
@@ -57,6 +57,8 @@ export const SpecificEnterpriseView: React.FC<SpecificEnterpriseViewProps> = ({
     memberships,
     activeMemberships,
     orders,
+    isShopOnline,
+    isShopAvailabilityLoading,
     shopServices,
     shopReviews,
     addShopReview,
@@ -203,6 +205,12 @@ export const SpecificEnterpriseView: React.FC<SpecificEnterpriseViewProps> = ({
 
   const isShopMembershipEnabled = Boolean(activeShopInfo.membershipEnabled);
   const shopMembershipPrice = activeShopInfo.membershipPrice;
+  const canUploadToShop = !isShopAvailabilityLoading && isShopOnline(selectedEnterprise.id);
+  const uploadActionLabel = isShopAvailabilityLoading
+    ? 'Checking PrintHub...'
+    : canUploadToShop
+      ? 'Upload Document for Printing'
+      : 'PrintHub Is Offline';
 
   const [dateFilter, setDateFilter] = useState<'All' | 'Today' | 'This Week' | 'This Month'>('All');
   const [isPerksModalOpen, setIsPerksModalOpen] = useState(false);
@@ -649,11 +657,16 @@ export const SpecificEnterpriseView: React.FC<SpecificEnterpriseViewProps> = ({
               {/* VIP Queue Print Trigger */}
               <button
                 type="button"
+                disabled={!canUploadToShop}
                 onClick={onOpenUpload}
-                className="w-full mt-3 py-2 px-3 rounded-xl bg-amber-400 hover:bg-amber-500 active:scale-95 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 font-heading shadow-xs transition-transform"
+                className={`w-full mt-3 py-2 px-3 rounded-xl ${
+                  canUploadToShop
+                    ? 'bg-amber-400 hover:bg-amber-500 active:scale-95 text-slate-950'
+                    : 'bg-slate-300 text-slate-600 cursor-not-allowed'
+                } font-bold text-xs flex items-center justify-center gap-1.5 font-heading shadow-xs transition-transform`}
               >
-                <Crown className="w-3.5 h-3.5 fill-slate-950" />
-                <span>Send Print in VIP Priority Queue</span>
+                <Crown className={`w-3.5 h-3.5 ${canUploadToShop ? 'fill-slate-950' : ''}`} />
+                <span>{canUploadToShop ? 'Send Print in VIP Priority Queue' : uploadActionLabel}</span>
               </button>
             </div>
           ) : (
@@ -685,11 +698,16 @@ export const SpecificEnterpriseView: React.FC<SpecificEnterpriseViewProps> = ({
       {/* 4. Upload Document Primary Action */}
       <button
         type="button"
+        disabled={!canUploadToShop}
         onClick={onOpenUpload}
-        className="w-full py-3 rounded-2xl bg-[#FF1300] hover:bg-[#E01100] active:scale-95 text-white text-xs font-bold flex items-center justify-center gap-2 shadow-sm shadow-red-500/25 transition-all font-heading"
+        className={`w-full py-3 rounded-2xl ${
+          canUploadToShop
+            ? 'bg-[#FF1300] hover:bg-[#E01100] active:scale-95 text-white shadow-red-500/25'
+            : 'bg-slate-300 text-slate-600 shadow-none cursor-not-allowed'
+        } text-xs font-bold flex items-center justify-center gap-2 shadow-sm transition-all font-heading`}
       >
         <Upload className="w-4 h-4 stroke-[2.2]" />
-        <span>Upload Document for Printing</span>
+        <span>{uploadActionLabel}</span>
       </button>
 
       {/* 5. Receipt History with Clean Aligned Filter Options (User Requirement) */}

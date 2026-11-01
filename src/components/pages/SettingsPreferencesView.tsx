@@ -31,6 +31,12 @@ interface SettingsPreferencesViewProps {
 }
 
 export const SettingsPreferencesView: React.FC<SettingsPreferencesViewProps> = ({ onBackToHome }) => {
+  useEffect(() => {
+    document.title = 'Settings and Preferences | printOn24';
+    let robots = document.head.querySelector('meta[name="robots"]') as HTMLMetaElement | null;
+    if (!robots) { robots = document.createElement('meta'); robots.name = 'robots'; document.head.appendChild(robots); }
+    robots.content = 'noindex, nofollow, noarchive';
+  }, []);
   const { user } = usePrintPerfect();
   const isAndroidApp = Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android';
   const [androidPermissionStatuses, setAndroidPermissionStatuses] = useState<AndroidPermissionStatuses | null>(null);
