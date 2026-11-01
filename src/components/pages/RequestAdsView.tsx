@@ -158,7 +158,7 @@ export const RequestAdsView: React.FC<RequestAdsViewProps> = ({ onBackToHome }) 
           </button>
         </form>
       </div>
-      <section className="bg-white rounded-3xl p-6 md:p-8 border border-slate-200/80 shadow-xs" aria-labelledby="request-ads-faq-heading">
+      <section className="hidden md:block bg-white rounded-3xl p-6 md:p-8 border border-slate-200/80 shadow-xs" aria-labelledby="request-ads-faq-heading">
         <h2 id="request-ads-faq-heading" className="text-xl font-extrabold text-slate-900 font-heading">Advertising FAQs</h2>
         <div className="mt-4 space-y-3">
           {advertiseFaqs.map(([question, answer]) => (

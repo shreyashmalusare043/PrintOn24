@@ -966,7 +966,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           );
         })()}
       </div>
-      <section className="bg-white rounded-3xl p-5 border border-slate-200/90 shadow-sm space-y-4" aria-labelledby="profile-faq-heading">
+      <section className="hidden md:block bg-white rounded-3xl p-5 border border-slate-200/90 shadow-sm space-y-4" aria-labelledby="profile-faq-heading">
         <h3 id="profile-faq-heading" className="text-xl font-extrabold text-slate-900 font-heading">Profile &amp; Membership FAQs</h3>
         <div className="grid gap-3">
           {profileFaqs.map(([question, answer]) => (
