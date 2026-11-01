@@ -189,6 +189,7 @@ export interface RemoteShopData {
   longitude: number;
   rating: number;
   totalReviews: number;
+  isOnline: boolean;
   isOpen: boolean;
   phone: string;
   ownerName: string;
@@ -439,7 +440,6 @@ export async function getPrintShops(): Promise<RemoteShopData[]> {
     const { data, error } = await supabase
       .from('print_shops')
       .select('*')
-      .neq('status', 'inactive')
       .order('rating', { ascending: false });
 
     if (error || !Array.isArray(data) || data.length === 0) {
@@ -472,9 +472,7 @@ export async function getPrintShops(): Promise<RemoteShopData[]> {
       dynamicTypesByShopId.set(row.shop_id, current);
     });
 
-    return data
-      .filter((shop: any) => shop.status !== 'inactive' && shop.status !== 'disabled' && shop.is_open !== false)
-      .map((shop: any) => ({
+    return data.map((shop: any) => ({
         id: shop.id,
         name: shop.name,
         address: shop.address,
@@ -483,6 +481,7 @@ export async function getPrintShops(): Promise<RemoteShopData[]> {
         longitude: Number(shop.longitude) || 73.8567,
         rating: Number(shop.rating) || 4.8,
         totalReviews: shop.total_reviews || 120,
+        isOnline: shop.is_online !== false,
         isOpen: shop.is_open ?? true,
         phone: shop.phone || '+91 98230 11223',
         ownerName: shop.owner_name || 'Partner Manager',
@@ -513,7 +512,7 @@ export async function findShopByCodeOrId(identifier: string): Promise<RemoteShop
 
     if (error || !data) return null;
 
-    if (data.status === 'inactive' || data.status === 'disabled' || data.is_open === false) {
+    if (data.is_online === false) {
       return null;
     }
 
@@ -526,6 +525,7 @@ export async function findShopByCodeOrId(identifier: string): Promise<RemoteShop
       longitude: Number(data.longitude || 73.8567),
       rating: Number(data.rating || 4.8),
       totalReviews: data.total_reviews || 120,
+      isOnline: data.is_online !== false,
       isOpen: data.is_open ?? true,
       phone: data.phone || '+91 98230 11223',
       ownerName: data.owner_name || 'Partner Manager',
@@ -559,13 +559,13 @@ export async function fetchShopByTerminalCode(code: string): Promise<PrintEnterp
         .maybeSingle();
 
       if (!fallbackData) return null;
-      if (fallbackData.status === 'inactive' || fallbackData.status === 'disabled' || fallbackData.is_open === false) {
+      if (fallbackData.is_online === false) {
         return null;
       }
       return mapDbShopToEnterprise(fallbackData, await getShopPricingRecordWithDynamicTypes(fallbackData.id));
     }
 
-    if (data.status === 'inactive' || data.status === 'disabled' || data.is_open === false) {
+    if (data.is_online === false) {
       return null;
     }
 
@@ -953,6 +953,7 @@ export interface DocumentConversionResult {
   pdfUrl?: string;
   storagePath?: string;
   totalPages?: number;
+  pageCountSource?: 'rendered-pdf';
   sheets?: string[];
   selectedSheet?: string;
   scaling?: string;
@@ -1008,15 +1009,36 @@ export async function convertDocumentViaBackend(payload: {
       body
     });
 
-    if (error || !data) {
-      console.error('convertDocumentViaBackend error:', error);
-      return null;
+    if (error) {
+      let errorMessage = error.message || 'Document conversion failed.';
+      const errorContext = 'context' in error ? error.context : undefined;
+      if (errorContext instanceof Response) {
+        const responseText = await errorContext.clone().text();
+        if (responseText.trim()) {
+          try {
+            const responseBody = JSON.parse(responseText);
+            errorMessage = responseBody.error || responseBody.message || errorMessage;
+          } catch {
+            errorMessage = responseText.trim();
+          }
+        }
+      }
+      console.error('convertDocumentViaBackend error:', errorMessage);
+      return { success: false, error: errorMessage };
+    }
+
+    if (!data) {
+      console.error('convertDocumentViaBackend error: conversion function returned no data.');
+      return { success: false, error: 'The conversion service returned no response.' };
     }
 
     return data;
   } catch (err) {
     console.error('convertDocumentViaBackend exception:', err);
-    return null;
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'The conversion service could not be reached.'
+    };
   }
 }
 

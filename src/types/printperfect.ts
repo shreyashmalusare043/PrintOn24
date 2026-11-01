@@ -211,6 +211,7 @@ export interface UploadedDoc {
   uploadedAt: string;
   convertedPdfUrl?: string;
   isConverted?: boolean;
+  pageCountMatchesPreview?: boolean;
   conversionStatus?: 'idle' | 'converting' | 'converted' | 'failed';
   excelSheets?: string[];
   selectedSheet?: string;

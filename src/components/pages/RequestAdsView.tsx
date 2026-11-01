@@ -51,7 +51,7 @@ export const RequestAdsView: React.FC<RequestAdsViewProps> = ({ onBackToHome }) 
           <span className="px-3 py-1 rounded-full bg-white/20 text-xs font-bold uppercase tracking-wider font-heading">
             Campus Ad Network
           </span>
-          <h1 className="text-2xl md:text-3xl font-black font-heading leading-tight">{"Reach 40,000+ Verified Peoples Every Single Day"}</h1>
+          <h1 className="text-2xl md:text-3xl font-black font-heading leading-tight">{"Reach 4,000+ Verified Peoples Every Single Day"}</h1>
           <p className="text-xs md:text-sm text-white/90 font-normal">{"Promote hackathons, tech certifications, Peoples discounts, and job openings right inside the print app and on physical paper receipt footers."}</p>
         </div>
       </div>

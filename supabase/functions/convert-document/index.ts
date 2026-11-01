@@ -228,8 +228,8 @@ Deno.serve(async (req) => {
     const isXlsx = fileType === "XLSX" || fileName.toLowerCase().endsWith(".xlsx");
     const isXls = fileType.includes("XLS") || fileType.includes("SHEET") || fileName.match(/\.xlsx?$/i);
 
-    // If Excel, inspect workbook sheets for the configuration dropdown
-    if (isXls && !isXlsx) {
+    // Legacy .xls files can be rendered, but their sheets cannot be configured here.
+    if (isXls && !isXlsx && inspectOnly) {
       return new Response(
         JSON.stringify({
           success: false,
@@ -273,6 +273,7 @@ Deno.serve(async (req) => {
 
     let convertedPdfBytes: Uint8Array | null = null;
     let conversionMethod = "Native-PDF";
+    let conversionError = "";
 
     // 2. Perform Gotenberg LibreOffice Conversion for non-PDF documents
     if (isPdf) {
@@ -293,20 +294,32 @@ Deno.serve(async (req) => {
         const blob = new Blob([blobBuffer], { type: "application/octet-stream" });
         form.append("files", blob, fileName);
 
-        const gotenbergRes = await fetch(`${gotenbergUrl}/forms/libreoffice/convert`, {
-          method: "POST",
-          body: form,
-        });
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const gotenbergRes = await fetch(`${gotenbergUrl}/forms/libreoffice/convert`, {
+            method: "POST",
+            body: form,
+          });
+          if (gotenbergRes.ok) {
+            const arrayBuf = await gotenbergRes.arrayBuffer();
+            convertedPdfBytes = new Uint8Array(arrayBuf);
+            conversionMethod = "Gotenberg-LibreOffice";
+            break;
+          }
 
-        if (gotenbergRes.ok) {
-          const arrayBuf = await gotenbergRes.arrayBuffer();
-          convertedPdfBytes = new Uint8Array(arrayBuf);
-          conversionMethod = "Gotenberg-LibreOffice";
-        } else {
-          const errText = await gotenbergRes.text().catch(() => "");
-          console.error("Gotenberg convert failed:", gotenbergRes.status, errText);
+          const errorBody = await gotenbergRes.text();
+          conversionError = `The document renderer returned HTTP ${gotenbergRes.status}.`;
+          const shouldRetry = [429, 502, 503, 504].includes(gotenbergRes.status) && attempt < 2;
+          console.error("Gotenberg convert failed:", gotenbergRes.status, errorBody);
+          if (!shouldRetry) break;
+
+          const retryAfter = Number(gotenbergRes.headers.get("retry-after"));
+          const delayMs = Number.isFinite(retryAfter) && retryAfter > 0
+            ? Math.min(retryAfter * 1000, 5000)
+            : 500 * (attempt + 1);
+          await new Promise(resolve => setTimeout(resolve, delayMs));
         }
       } catch (gotenbergErr: any) {
+        conversionError = "The document renderer could not be reached.";
         console.error("Gotenberg connection error:", gotenbergErr.message);
       }
     }
@@ -316,7 +329,7 @@ Deno.serve(async (req) => {
       return new Response(
         JSON.stringify({
           success: false,
-          error: "Unable to render this document. Please try again or upload the file again.",
+          error: conversionError || "Unable to render this document. Please try again or upload the file again.",
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 502 }
       );
@@ -348,33 +361,19 @@ Deno.serve(async (req) => {
 
     const pdfPublicUrl = urlData?.publicUrl || "";
 
-    // 5. Update or insert record in 'uploaded_documents'
+    // Update preview metadata only; the client owns the original upload record and storage path.
     try {
-      await supabase.from("uploaded_documents").upsert({
-        id: docId,
-        user_id: userId,
-        shop_id: shopId || null,
-        file_name: pdfFileName,
-        original_file_name: fileName,
-        file_type: isPdf ? "PDF" : fileType,
-        mime_type: "application/pdf",
-        file_size: convertedPdfBytes.length,
-        file_size_mb: Number((convertedPdfBytes.length / (1024 * 1024)).toFixed(2)) || 0.1,
+      const { error: metadataError } = await supabase.from("uploaded_documents").update({
         total_pages: totalPages,
-        storage_bucket: "print_documents",
-        storage_path: pdfStoragePath,
-        preview_url: pdfPublicUrl,
-        converted_pdf_url: pdfPublicUrl,
-        original_file_url: originalStorageUrl || pdfPublicUrl,
-        upload_status: "READY",
         conversion_service: conversionMethod,
         excel_sheets: sheets,
         excel_scaling: scaling,
-        created_at: new Date().toISOString(),
-        expiry_at: new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString(),
-      });
+      }).eq("id", docId);
+      if (metadataError) {
+        console.warn("Could not update document page metadata:", metadataError.message);
+      }
     } catch (dbErr) {
-      console.warn("uploaded_documents upsert notice:", dbErr);
+      console.warn("Document preview metadata update notice:", dbErr);
     }
 
     return new Response(
@@ -389,6 +388,7 @@ Deno.serve(async (req) => {
         pdfUrl: pdfPublicUrl,
         storagePath: pdfStoragePath,
         totalPages,
+        pageCountSource: "rendered-pdf",
         sheets,
         selectedSheet,
         scaling,

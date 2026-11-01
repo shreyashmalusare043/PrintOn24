@@ -97,7 +97,7 @@ export const ContactUsView: React.FC<ContactUsViewProps> = ({ onBackToHome }) =>
                 required
                 value={name}
                 onChange={e => setName(e.target.value)}
-                placeholder="Shreyash Malusare"
+                placeholder="Your Name"
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:border-[#FF1300] outline-none"
               />
             </div>
@@ -108,7 +108,7 @@ export const ContactUsView: React.FC<ContactUsViewProps> = ({ onBackToHome }) =>
                 required
                 value={email}
                 onChange={e => setEmail(e.target.value)}
-                placeholder="name@student.college.edu"
+                placeholder="Enter Your Email"
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:border-[#FF1300] outline-none"
               />
             </div>

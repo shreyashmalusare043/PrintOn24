@@ -1,32 +1,32 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import jsQR from 'jsqr';
 import {
-  QrCode,
+  AlertCircle,
+  ArrowRight,
+  Building2,
   Camera,
   CheckCircle2,
+  HelpCircle,
+  Image as ImageIcon,
   MapPin,
   Phone,
-  ArrowRight,
-  Sparkles,
-  RefreshCw,
-  Building2,
-  AlertCircle,
-  Tag,
-  Image as ImageIcon,
-  Zap,
-  ZapOff,
-  SwitchCamera,
   Play,
-  Square,
-  Volume2,
-  HelpCircle,
-  X,
+  QrCode,
+  RefreshCw,
   Search,
-  Star
+  Sparkles,
+  Square,
+  Star,
+  SwitchCamera,
+  Tag,
+  Volume2,
+  X,
+  Zap,
+  ZapOff
 } from 'lucide-react';
-import jsQR from 'jsqr';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import { usePrintPerfect } from '../../contexts/PrintPerfectContext';
 import { getShopInitials } from '../../utils/shopInitials';
-import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
 
 interface ScanViewProps {
@@ -41,6 +41,7 @@ export const ScanView: React.FC<ScanViewProps> = ({ onProceedToUpload }) => {
     hasExplicitlySelectedEnterprise,
     verifyAndSelectShopByCode,
     selectEnterprise,
+    isShopOnline,
     t
   } = usePrintPerfect();
 
@@ -75,26 +76,26 @@ export const ScanView: React.FC<ScanViewProps> = ({ onProceedToUpload }) => {
   const searchSuggestions = React.useMemo(() => {
     const query = manualCode.trim().toLowerCase();
     if (!query) return [];
-    return enterprises.filter(ent =>
+    return enterprises.filter(ent => isShopOnline(ent.id) && (
       ent.name.toLowerCase().includes(query) ||
       ent.terminalCode.toLowerCase().includes(query) ||
       ent.shortCode.toLowerCase().includes(query) ||
       (ent.address && ent.address.toLowerCase().includes(query)) ||
       (ent.city && ent.city.toLowerCase().includes(query))
-    );
-  }, [manualCode, enterprises]);
+    ));
+  }, [manualCode, enterprises, isShopOnline]);
 
   const filteredDirectoryShops = React.useMemo(() => {
     const query = directorySearch.trim().toLowerCase();
-    if (!query) return enterprises;
-    return enterprises.filter(ent =>
+    if (!query) return enterprises.filter(ent => isShopOnline(ent.id));
+    return enterprises.filter(ent => isShopOnline(ent.id) && (
       ent.name.toLowerCase().includes(query) ||
       ent.terminalCode.toLowerCase().includes(query) ||
       ent.shortCode.toLowerCase().includes(query) ||
       (ent.address && ent.address.toLowerCase().includes(query)) ||
       (ent.city && ent.city.toLowerCase().includes(query))
-    );
-  }, [directorySearch, enterprises]);
+    ));
+  }, [directorySearch, enterprises, isShopOnline]);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -689,7 +690,7 @@ export const ScanView: React.FC<ScanViewProps> = ({ onProceedToUpload }) => {
         {orders.length > 0 && (
           <div className="pt-2 border-t border-slate-100 flex items-center gap-1.5 flex-wrap text-xs">
             <span className="text-slate-400 font-medium text-[11px]">Quick Terminals:</span>
-            {enterprises.filter(e => orders.some(o => o.enterpriseId === e.id)).slice(0, 3).map(ent => (
+            {enterprises.filter(e => isShopOnline(e.id) && orders.some(o => o.enterpriseId === e.id)).slice(0, 3).map(ent => (
               <button
                 key={ent.id}
                 type="button"

@@ -1,47 +1,48 @@
-import React, { useState, useRef, useEffect } from 'react';
 import {
-  UploadCloud,
-  FolderOpen,
-  FileText,
-  Trash2,
-  RefreshCw,
-  Settings2,
-  File,
-  Layers,
-  Copy,
-  Smartphone,
-  Maximize2,
-  Grid,
-  CheckCircle2,
+  AlertCircle,
   ArrowRight,
+  Check,
+  CheckCircle2,
+  ChevronRight,
+  Copy,
+  Crown,
+  ExternalLink,
+  Eye,
+  File,
+  FilePlus,
+  FileText,
+  FolderOpen,
+  Grid,
   HardDrive,
   ImageIcon,
-  Wand2,
-  Plus,
+  Layers,
+  Maximize2,
   Minus,
-  Sparkles,
-  Crown,
-  User,
-  ShieldCheck,
-  Check,
-  X,
-  FilePlus,
-  AlertCircle,
-  Table,
+  Plus,
   Presentation,
-  Eye,
-  ExternalLink,
-  ChevronRight
+  RefreshCw,
+  Settings2,
+  ShieldCheck,
+  Smartphone,
+  Sparkles,
+  Table,
+  Trash2,
+  UploadCloud,
+  User,
+  Wand2,
+  X
 } from 'lucide-react';
-import { usePrintPerfect } from '../../contexts/PrintPerfectContext';
-import { ImageEditorModal } from './ImageEditorModal';
-import type { CustomPageRangeRule, ImageEditingState, UploadedDoc } from '../../types/printperfect';
+import React, { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { fetchUploadPageAds, getShopAvailablePaperSizes, getShopPaperPricingDetails, type UploadPageAdItem } from '../../services/api';
-import { formatFullName } from '../../utils/nameFormat';
+import { usePrintPerfect } from '../../contexts/PrintPerfectContext';
 import { supabase } from '../../db/supabase';
-import { UniformAlertModal } from '../common/UniformAlertModal';
 import { getPrintModeEligibility, type PrintSides, type PrintType } from '../../lib/printEligibility';
+import { fetchUploadPageAds, getShopAvailablePaperSizes, getShopPaperPricingDetails, type UploadPageAdItem } from '../../services/api';
+import type { CustomPageRangeRule, ImageEditingState, UploadedDoc } from '../../types/printperfect';
+import { formatFullName } from '../../utils/nameFormat';
+import { getPowerPointSlideCount } from '../../utils/powerPointSlideCount';
+import { UniformAlertModal } from '../common/UniformAlertModal';
+import { ImageEditorModal } from './ImageEditorModal';
 
 interface UploadConfigurationViewProps {
   onProceedToCheckout: () => void;
@@ -66,6 +67,8 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
     updateUser,
     selectedEnterprise,
     hasExplicitlySelectedEnterprise,
+    isShopAvailabilityLoading,
+    isShopOnline,
     currentDoc,
     setCurrentDoc,
     uploadedDocs,
@@ -89,6 +92,12 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
     clearUploadSession
   } = usePrintPerfect();
   const [selectedConfigTargetIds, setSelectedConfigTargetIds] = useState<string[]>([]);
+  const isSelectedShopChecking = hasExplicitlySelectedEnterprise && isShopAvailabilityLoading;
+  const isSelectedShopOffline =
+    hasExplicitlySelectedEnterprise &&
+    !isShopAvailabilityLoading &&
+    !isShopOnline(selectedEnterprise.id);
+  const isUploadBlocked = isSelectedShopChecking || isSelectedShopOffline;
   const updatePrintConfig = (updates: Parameters<typeof updatePrintConfigContext>[0]) => {
     updatePrintConfigContext(updates);
   };
@@ -363,16 +372,14 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
 
     // PPT / PPTX: detect slide count and default to Landscape
     if (file.name.match(/\.pptx?$/i) || file.type.includes('presentation')) {
-      let pages = 1;
+      let pages = 0;
       try {
-        const buffer = await file.arrayBuffer();
-        const text = new TextDecoder('latin1').decode(buffer);
-        const slideMatches = text.match(/ppt\/slides\/slide\d+\.xml/g);
-        if (slideMatches && slideMatches.length > 0) {
-          const uniqueSlides = new Set(slideMatches).size;
-          if (uniqueSlides > 0) pages = uniqueSlides;
+        if (/\.pptx$/i.test(file.name) || file.type.includes('presentation')) {
+          pages = await getPowerPointSlideCount(file);
         }
-      } catch {}
+      } catch (error) {
+        console.error('PowerPoint slide count detection failed:', error);
+      }
       return { pages, orientation: 'Landscape' };
     }
 
@@ -392,6 +399,15 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
 
   // Real-time Upload Runner with Secure Storage Upload & 12h Expiry
   const startUploadSimulation = async (files: FileList | File[]) => {
+    if (isSelectedShopChecking) {
+      toast.error('Checking PrintHub availability. Please try again.');
+      return;
+    }
+    if (isSelectedShopOffline) {
+      toast.error('PrintHub Is Offline');
+      return;
+    }
+
     const fileList = Array.from(files);
     if (fileList.length === 0) return;
 
@@ -492,11 +508,12 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
       lastProcessedSharedFilesRef.current = null;
       return;
     }
+    if (isSelectedShopChecking) return;
     if (lastProcessedSharedFilesRef.current === sharedFiles) return;
 
     lastProcessedSharedFilesRef.current = sharedFiles;
     void startUploadSimulation(sharedFiles).finally(() => onSharedFilesHandled?.());
-  }, [sharedFiles]);
+  }, [sharedFiles, isSelectedShopChecking]);
 
   const handleFileDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -525,6 +542,14 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
   const handleProceedClick = () => {
     if (!hasExplicitlySelectedEnterprise) {
       toast.error('Select/Connect Printing Shop First');
+      return;
+    }
+    if (isSelectedShopChecking) {
+      toast.error('Checking PrintHub availability. Please try again.');
+      return;
+    }
+    if (isSelectedShopOffline) {
+      toast.error('PrintHub Is Offline');
       return;
     }
     const allDocs = uploadedDocs.length > 0 ? uploadedDocs : (currentDoc ? [currentDoc] : []);
@@ -821,6 +846,7 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
               multiple
               accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.webp"
               onChange={handleFileInputChange}
+              disabled={isUploadBlocked}
               className="hidden"
             />
 
@@ -832,13 +858,19 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
               Drag & Drop Files or Click Choose Files
             </h3>
             <p className="text-[11px] text-slate-500 mt-0.5 max-w-sm mx-auto">{"Select multiple files or add 1-by-1 • Supports PDF, Word, Excel, PPT & Images"}</p>
+            {isUploadBlocked && (
+              <p className="mt-2 text-xs font-bold text-red-600" role="status">
+                {isSelectedShopChecking ? 'Checking PrintHub...' : 'PrintHub Is Offline'}
+              </p>
+            )}
 
             {/* Choose File Button */}
             <div className="mt-3 flex items-center justify-center gap-2">
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-[#FF1300] hover:bg-[#E01100] active:scale-95 text-white text-xs font-bold shadow-md shadow-red-500/25 transition-all font-heading"
+                disabled={isUploadBlocked}
+                className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-[#FF1300] hover:bg-[#E01100] active:scale-95 text-white text-xs font-bold shadow-md shadow-red-500/25 transition-all font-heading disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <FolderOpen className="w-4 h-4" />
                 <span>{uploadedDocs.length > 0 ? 'Add Another File' : 'Choose Files'}</span>
@@ -896,7 +928,8 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-full bg-red-50 px-3 py-1.5 text-xs font-bold text-[#FF1300] shadow-xs transition-colors hover:bg-red-100"
+                  disabled={isUploadBlocked}
+                  className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-full bg-red-50 px-3 py-1.5 text-xs font-bold text-[#FF1300] shadow-xs transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   <span>{"Add Another File"}</span>
@@ -1002,7 +1035,7 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                         <div className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px]">
                           <span className="text-slate-500">
                             {doc.conversionStatus === 'failed'
-                              ? 'Conversion failed'
+                              ? 'Page preview unavailable'
                               : (doc.fileType === 'XLS' || doc.fileType === 'XLSX') && doc.conversionStatus !== 'converted'
                                 ? 'Choose sheet & Set'
                                 : `${doc.totalPages} ${doc.totalPages === 1 ? 'Page' : 'Pages'}`}
@@ -1031,8 +1064,22 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                         {!isDocImg && (
                           <button
                             type="button"
-                            onClick={() => {
-                              const targetUrl = doc.convertedPdfUrl || doc.previewUrl || doc.storageUrl;
+                            onClick={async () => {
+                              const isOfficeDoc = ['DOC', 'DOCX', 'XLS', 'XLSX', 'PPT', 'PPTX'].includes(doc.fileType);
+                              const needsPreviewRefresh =
+                                isOfficeDoc && doc.pageCountMatchesPreview === false;
+                              let targetUrl = needsPreviewRefresh
+                                ? ''
+                                : doc.convertedPdfUrl ||
+                                  (isOfficeDoc && doc.conversionStatus !== 'converted'
+                                    ? ''
+                                    : doc.previewUrl || doc.storageUrl);
+                              if (!targetUrl && isOfficeDoc) {
+                                targetUrl = await reconvertDocument(doc.id, {
+                                  selectedSheet: doc.selectedSheet,
+                                  scaling: doc.excelScaling
+                                }) || '';
+                              }
                               if (targetUrl) {
                                 const activeConfig = isCurrent ? printConfig : (doc.printConfig || printConfig);
                                 const activePayload = {
@@ -1133,7 +1180,7 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                   </span>
                   <span className="text-[10px] text-slate-500 font-semibold">
                     {currentDoc.fileType} • {currentDoc.conversionStatus === 'failed'
-                      ? 'Conversion failed'
+                      ? 'Page preview unavailable'
                       : (currentDoc.fileType === 'XLS' || currentDoc.fileType === 'XLSX') && currentDoc.conversionStatus !== 'converted'
                         ? 'Choose sheet & Set'
                         : `${currentDoc.totalPages} ${currentDoc.totalPages === 1 ? 'Page' : 'Pages'}`}
@@ -1209,9 +1256,8 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
           </div>
 
           {/* Excel Specific Print Configuration: Sheet Selection & 4 Scaling Options */}
-          {(currentDoc?.fileType === 'XLS' ||
-            currentDoc?.fileType === 'XLSX' ||
-            Boolean(currentDoc?.fileName?.match(/\.(xlsx?|csv)$/i))) && (
+          {(currentDoc?.fileType === 'XLSX' ||
+            Boolean(currentDoc?.fileName?.match(/\.(xlsx|csv)$/i))) && (
             <div className="bg-white rounded-2xl p-3.5 border-2 border-red-100 shadow-xs space-y-3 animate-in fade-in">
               <div className="flex items-center justify-between border-b border-red-50 pb-2">
                 <div className="flex items-center gap-2">
@@ -1222,7 +1268,7 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                 </div>
                 {isReconverting && (
                   <span className="text-[10px] font-bold text-[#FF1300] flex items-center gap-1 animate-pulse">
-                    <RefreshCw className="w-3 h-3 animate-spin" /> Updating PDF...
+                    <RefreshCw className="w-3 h-3 animate-spin" /> Updating page preview...
                   </span>
                 )}
               </div>
@@ -1305,7 +1351,7 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                 }}
                 className="w-full rounded-xl bg-[#FF1300] px-4 py-2.5 text-xs font-black text-white shadow-sm transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {isReconverting ? 'Setting Excel options...' : 'Set & Convert to PDF'}
+                {isReconverting ? 'Updating page preview...' : 'Apply Sheet & Scaling'}
               </button>
             </div>
           )}
