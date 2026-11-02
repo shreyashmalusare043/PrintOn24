@@ -911,7 +911,6 @@ export async function getShopAvailablePaperSizes(shopId: string): Promise<string
 }
 
 export async function getShopPaperPricingDetails(shopId: string): Promise<ShopPaperPricingInfo> {
-  const sizesSet = new Set<string>();
   const paperPrices: Record<string, { bwPrice?: number; colorPrice?: number }> = {};
 
   if (!shopId) {
@@ -919,76 +918,24 @@ export async function getShopPaperPricingDetails(shopId: string): Promise<ShopPa
   }
 
   try {
-    const [{ data: pricing, error: pricingError }, dynamicTypeRows] = await Promise.all([
-      supabase.from('shop_pricing').select('*').eq('shop_id', shopId).maybeSingle(),
-      getShopDynamicPaperTypeRows(shopId)
-    ]);
-    if (pricingError) throw pricingError;
-
-    const mapped = mapShopPricingWithDynamicTypes(pricing as ShopPricingRow | null, shopId, dynamicTypeRows);
-    if (pricing) {
-      const baseRates = mapped.paperSizeRates?.A4;
-      if (baseRates?.bwSingle !== undefined || baseRates?.colorSingle !== undefined) {
-        sizesSet.add('A4');
-        paperPrices.A4 = { bwPrice: baseRates.bwSingle, colorPrice: baseRates.colorSingle };
+    const dynamicTypeRows = await getShopDynamicPaperTypeRows(shopId);
+    const typesByName = new Map<string, ShopDynamicPaperTypeRow>();
+    dynamicTypeRows.forEach(row => {
+      const name = row.name.trim();
+      if (name && !typesByName.has(name.toLocaleLowerCase())) {
+        typesByName.set(name.toLocaleLowerCase(), { ...row, name });
       }
+    });
 
-      Object.entries(mapped.paperSizeRates || {}).forEach(([size, rates]) => {
-        if (size !== 'A4' && (rates.bwSingle !== undefined || rates.colorSingle !== undefined)) {
-          sizesSet.add(size);
-          paperPrices[size] = { bwPrice: rates.bwSingle, colorPrice: rates.colorSingle };
-        }
-      });
+    const sizes = Array.from(typesByName.values(), paper => {
+      paperPrices[paper.name] = {
+        bwPrice: optionalShopRate(paper.bw_price),
+        colorPrice: optionalShopRate(paper.color_price)
+      };
+      return paper.name;
+    });
 
-      if (mapped.bondPaperRate !== undefined && mapped.bondPaperRate > 0 && baseRates?.bwSingle !== undefined && baseRates.colorSingle !== undefined) {
-        sizesSet.add('Bond');
-        paperPrices.Bond = {
-          bwPrice: baseRates.bwSingle + mapped.bondPaperRate,
-          colorPrice: baseRates.colorSingle + mapped.bondPaperRate
-        };
-      }
-      if (mapped.glossyPaperRate !== undefined && mapped.glossyPaperRate > 0 && baseRates?.bwSingle !== undefined && baseRates.colorSingle !== undefined) {
-        sizesSet.add('Glossy');
-        paperPrices.Glossy = {
-          bwPrice: baseRates.bwSingle + mapped.glossyPaperRate,
-          colorPrice: baseRates.colorSingle + mapped.glossyPaperRate
-        };
-      }
-    }
-
-    // A printer supporting a size does not make that size chargeable without a configured rate.
-    const { data: printers, error: printersError } = await supabase
-      .from('shop_printers')
-      .select('paper_sizes, status')
-      .eq('shop_id', shopId);
-    if (printersError) throw printersError;
-
-    if (Array.isArray(printers)) {
-      printers.forEach(p => {
-        if (p.status !== 'inactive' && p.status !== 'disabled' && Array.isArray(p.paper_sizes)) {
-          p.paper_sizes.forEach((s: string) => {
-            const size = s?.trim();
-            if (size && paperPrices[size]) sizesSet.add(size);
-          });
-        }
-      });
-    }
-
-    if (sizesSet.size > 0) {
-      // Return known ordered sizes
-      const standardOrder = ['A4', 'A3', 'Letter', 'Legal', 'Bond', 'Glossy', 'Executive'];
-      const sorted = Array.from(sizesSet).sort((a, b) => {
-        const idxA = standardOrder.indexOf(a);
-        const idxB = standardOrder.indexOf(b);
-        if (idxA !== -1 && idxB !== -1) return idxA - idxB;
-        if (idxA !== -1) return -1;
-        if (idxB !== -1) return 1;
-        return a.localeCompare(b);
-      });
-      return { sizes: sorted, paperPrices };
-    }
-
-    return { sizes: [], paperPrices: {} };
+    return { sizes, paperPrices };
   } catch (err) {
     console.error('getShopPaperPricingDetails error:', err);
     throw err;
