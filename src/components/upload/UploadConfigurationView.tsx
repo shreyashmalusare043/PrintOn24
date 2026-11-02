@@ -220,7 +220,7 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
   const [isTermsModalOpen, setIsTermsModalOpen] = useState(false);
   const [hasAgreedTerms, setHasAgreedTerms] = useState(false);
 
-  // Dynamic paper sizes loaded from shop_pricing and shop_printers for connected shop (Requirement 5 & 6)
+  // Active paper sizes loaded from the connected shop's dynamic paper types.
   const [availablePaperSizes, setAvailablePaperSizes] = useState<string[]>([]);
   const [isLoadingPaperSizes, setIsLoadingPaperSizes] = useState<boolean>(false);
 
@@ -1230,7 +1230,7 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
 
         {/* Configuration List Rows */}
         <div className="space-y-2.5">
-          {/* Paper Size: Dropdown with A4 (default), A3, Letter, Legal, A5, Executive */}
+          {/* Paper Size options come from the connected shop's active dynamic paper types. */}
           <div className="bg-white rounded-2xl p-3 border border-red-100 shadow-xs flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <FileText className="w-4 h-4 text-slate-500" />
@@ -1259,13 +1259,7 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                 </option>
                 {availablePaperSizes.map(size => (
                   <option key={size} value={size}>
-                    {size === 'A4' ? 'A4 (Standard 210 × 297 mm)' :
-                     size === 'A3' ? 'A3 (Large 297 × 420 mm)' :
-                     size === 'Letter' ? 'Letter (8.5 × 11 in)' :
-                     size === 'Legal' ? 'Legal (8.5 × 14 in)' :
-                     size === 'Bond' ? 'Bond Paper (8.5 × 11 in)' :
-                     size === 'Executive' ? 'Executive (7.25 × 10.5 in)' :
-                     size}
+                    {size}
                   </option>
                 ))}
               </select>
