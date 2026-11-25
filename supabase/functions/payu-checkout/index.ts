@@ -14,12 +14,16 @@ const corsHeaders = {
 
 const PAYU_KEY = Deno.env.get("PAYU_KEY") || "";
 const PAYU_SALT = Deno.env.get("PAYU_SALT") || "";
-const PAYU_ENV = Deno.env.get("PAYU_ENV") || "test";
+const PAYU_ENV = (
+  Deno.env.get("PAYU_ENV") ||
+  Deno.env.get("PAYU_ENVIRONMENT") ||
+  "test"
+).trim().toLowerCase();
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY") || "";
 
 // PayU Official Hosted Checkout URL
-const PAYU_PAYMENT_URL = PAYU_ENV === "production" 
+const PAYU_PAYMENT_URL = ["production", "prod", "live"].includes(PAYU_ENV)
   ? "https://secure.payu.in/_payment" 
   : "https://test.payu.in/_payment";
 
