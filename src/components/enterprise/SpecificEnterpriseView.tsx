@@ -320,7 +320,7 @@ export const SpecificEnterpriseView: React.FC<SpecificEnterpriseViewProps> = ({
         });
 
         if (payuRes) {
-          // Verify payment directly with backend PayU salt token 9zvMlieMhahQa81Y2Y1EGoQlhPBmR9pf
+          // Verify the transaction through the PayU Edge Function.
           await verifyPayUPaymentViaEdge({
             txnid: payuRes.txnid,
             amount: planCost,

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import JsBarcode from 'jsbarcode';
 import {
   Printer,
   Copy,
@@ -37,6 +38,18 @@ export const ThermalReceiptView: React.FC<ThermalReceiptViewProps> = ({
   const [isMuted, setIsMuted] = useState(false);
   const [isRetrievingPrint, setIsRetrievingPrint] = useState(false);
   const [printAnimationKey, setPrintAnimationKey] = useState(1);
+  const barcodeRef = useRef<SVGSVGElement>(null);
+
+  useEffect(() => {
+    if (!barcodeRef.current) return;
+    JsBarcode(barcodeRef.current, order.tokenNumber, {
+      format: 'CODE128',
+      displayValue: false,
+      height: 48,
+      width: 2,
+      margin: 0
+    });
+  }, [order.tokenNumber]);
 
   // Exact online payment verification logic per requirements:
   // "Pay on Counter" -> NO "PAID" stamp (shows "PAY ON COUNTER • PENDING PAYMENT")
@@ -97,11 +110,28 @@ export const ThermalReceiptView: React.FC<ThermalReceiptViewProps> = ({
     toast.info('Re-dispensing thermal receipt from machine...');
   };
 
-  const handleDownloadPdf = () => {
+  const handleDownloadPdf = async () => {
     // Generate clean printable receipt
     const printWindow = window.open('', '_blank');
     if (!printWindow) {
       toast.error('Popups blocked. Please allow popups to download receipt PDF.');
+      return;
+    }
+    let barcodeDataUrl: string;
+    try {
+      const barcodeSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      JsBarcode(barcodeSvg, order.tokenNumber, {
+        format: 'CODE128',
+        displayValue: false,
+        height: 48,
+        width: 2,
+        margin: 0
+      });
+      barcodeDataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(new XMLSerializer().serializeToString(barcodeSvg))}`;
+    } catch (error) {
+      console.error('Failed to generate token barcode for receipt:', error);
+      printWindow.close();
+      toast.error('Could not generate the token barcode.');
       return;
     }
     const receiptHtml = `
@@ -117,6 +147,8 @@ export const ThermalReceiptView: React.FC<ThermalReceiptViewProps> = ({
             .row { display: flex; justify-content: space-between; margin: 6px 0; font-size: 13px; }
             .bold { font-weight: bold; }
             .footer { border-top: 2px dashed #cbd5e1; padding-top: 16px; margin-top: 16px; text-align: center; font-size: 11px; color: #64748b; }
+            .order-code { text-align: center; margin: 16px 0; font-size: 11px; font-family: monospace; }
+            .order-code img { display: block; max-width: 100%; height: 48px; margin: 0 auto 6px; }
           </style>
         </head>
         <body>
@@ -135,6 +167,10 @@ export const ThermalReceiptView: React.FC<ThermalReceiptViewProps> = ({
           <div class="row"><span class="bold">Payment Method:</span><span>${order.paymentMethod} (${order.paymentStatus})</span></div>
           <div class="row" style="font-size: 16px; font-weight: 900; color: #FF1300; margin-top: 12px; border-top: 1px solid #e2e8f0; padding-top: 8px;">
             <span>Grand Total:</span><span>₹${order.grandTotal.toFixed(2)}</span>
+          </div>
+          <div class="order-code">
+            <img src="${barcodeDataUrl}" alt="Token ID barcode" />
+            <strong>TOKEN ID: ${order.tokenNumber}</strong>
           </div>
           <div class="footer">
             <p>Thank you for printing with printOn24!</p>
@@ -416,19 +452,11 @@ Shop link: https://www.printon24.in/shopkeeper/${encodeURIComponent(order.enterp
                 </p>
               </div>
 
-              {/* Barcode Graphic & TXN Token */}
+              {/* Scannable token ID barcode */}
               <div className="pt-1 flex flex-col items-center justify-center">
-                <div className="h-10 w-52 flex items-center justify-center gap-[2px] bg-white px-2 py-1 rounded">
-                  {[2, 1, 3, 1, 4, 2, 1, 3, 2, 1, 2, 4, 1, 3, 2, 1, 4, 1, 2, 3, 1, 2, 4, 2, 1, 3, 1, 2].map((w, i) => (
-                    <span
-                      key={i}
-                      className="h-full bg-slate-900 inline-block"
-                      style={{ width: `${w}px` }}
-                    />
-                  ))}
-                </div>
+                <svg ref={barcodeRef} role="img" aria-label={`Barcode for token ${order.tokenNumber}`} />
                 <p className="text-[10px] font-mono font-bold tracking-widest text-slate-600 mt-1">
-                  TXN-{order.barcode}
+                  TOKEN ID: {order.tokenNumber}
                 </p>
               </div>
 

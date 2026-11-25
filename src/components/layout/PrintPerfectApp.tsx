@@ -262,17 +262,36 @@ const PrintPerfectAppContent: React.FC = () => {
     const txnid = params.get('txnid');
     const orderId = params.get('order_id');
     const errorMsg = params.get('error');
+    const reportPayUReturnToCheckout = (status: 'success' | 'failed') => {
+      if (!window.opener || window.opener.closed) return false;
+
+      window.opener.postMessage({
+        type: 'payu-payment-return',
+        status,
+        txnid: txnid || '',
+        mihpayid: params.get('mihpayid') || '',
+        error: errorMsg ? decodeURIComponent(errorMsg) : ''
+      }, window.location.origin);
+      window.history.replaceState({}, '', window.location.pathname);
+      window.close();
+      return true;
+    };
 
     if (payStatus === 'success') {
-      toast.success(`Payment verified via PayU! Txn: ${txnid ? txnid.slice(-8) : 'Confirmed'}`);
+      if (reportPayUReturnToCheckout('success')) return;
       window.history.replaceState({}, '', window.location.pathname);
       const matched = orders.find(o => o.id === orderId || (txnid && o.paymentOptionDetail?.includes(txnid)));
       if (matched) {
+        toast.success(`Payment verified via PayU! Txn: ${txnid ? txnid.slice(-8) : 'Confirmed'}`);
         setActiveReceiptOrder(matched);
+        setCurrentView('thermal_receipt');
+        scheduleAppDownloadSuggestion();
+      } else {
+        toast.success('PayU payment verified. Return to your checkout tab and select “Check Verification” to place the order.');
+        setCurrentView('checkout');
       }
-      setCurrentView('thermal_receipt');
-      scheduleAppDownloadSuggestion();
     } else if (payStatus === 'failed') {
+      if (reportPayUReturnToCheckout('failed')) return;
       toast.error(`PayU Payment Failed or Cancelled: ${errorMsg ? decodeURIComponent(errorMsg) : 'Transaction declined'}`);
       window.history.replaceState({}, '', window.location.pathname);
       setCurrentView('checkout');

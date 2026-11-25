@@ -12,14 +12,19 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
 };
 
-const PAYU_KEY = Deno.env.get("PAYU_KEY") || "nD7EiA";
-const PAYU_SALT = Deno.env.get("PAYU_SALT") || "9zvMlieMhahQa81Y2Y1EGoQlhPBmR9pf";
-const PAYU_ENV = Deno.env.get("PAYU_ENV") || "test";
+const PAYU_KEY = Deno.env.get("PAYU_KEY") || "";
+const PAYU_SALT = Deno.env.get("PAYU_SALT") || "";
+const PAYU_ENV = (
+  Deno.env.get("PAYU_ENV") ||
+  Deno.env.get("PAYU_ENVIRONMENT") ||
+  "test"
+).trim().toLowerCase();
+const PAYU_APP_URL = Deno.env.get("PAYU_APP_URL") || "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY") || "";
 
 // PayU Official Hosted Checkout URL
-const PAYU_PAYMENT_URL = PAYU_ENV === "production" 
+const PAYU_PAYMENT_URL = ["production", "prod", "live"].includes(PAYU_ENV)
   ? "https://secure.payu.in/_payment" 
   : "https://test.payu.in/_payment";
 
@@ -38,6 +43,12 @@ Deno.serve(async (req) => {
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
   const url = new URL(req.url);
+  if (!PAYU_KEY || !PAYU_SALT) {
+    return new Response(
+      JSON.stringify({ error: "PayU credentials are not configured for this project." }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
 
   // =========================================================================
   // PayU Gateway Callback Handler (surl / furl)
@@ -73,31 +84,54 @@ Deno.serve(async (req) => {
 
       const calculatedReverseHash = await computeSha512(hashSequence);
       const isHashValid = calculatedReverseHash.toLowerCase() === receivedHash.toLowerCase();
-      const isPaymentSuccess = status.toLowerCase() === "success" && isHashValid;
+      const { data: initiatedPayment, error: paymentLookupError } = await supabase
+        .from("payments")
+        .select("amount, order_id, shop_id")
+        .eq("payu_txnid", txnid)
+        .maybeSingle();
+      if (paymentLookupError) throw paymentLookupError;
+
+      const callbackAmount = Number(amount);
+      const initiatedAmount = Number(initiatedPayment?.amount);
+      const matchesInitiatedPayment = Boolean(
+        initiatedPayment &&
+        Number.isFinite(callbackAmount) &&
+        Number.isFinite(initiatedAmount) &&
+        callbackAmount.toFixed(2) === initiatedAmount.toFixed(2) &&
+        key === PAYU_KEY &&
+        (initiatedPayment.shop_id || "") === udf1 &&
+        (initiatedPayment.order_id || "") === udf3
+      );
+      const isPaymentSuccess =
+        status.toLowerCase() === "success" &&
+        isHashValid &&
+        matchesInitiatedPayment;
 
       console.log(`PayU Callback received: TXN=${txnid}, Status=${status}, HashValid=${isHashValid}`);
 
       // Update Database
-      await supabase
-        .from("payments")
-        .update({
+      if (matchesInitiatedPayment) {
+        const { error: paymentUpdateError } = await supabase
+          .from("payments")
+          .update({
           payu_mihpayid: mihpayid,
           payment_status: isPaymentSuccess ? "PAID" : "FAILED",
         })
         .eq("payu_txnid", txnid);
+        if (paymentUpdateError) throw paymentUpdateError;
 
-      if (udf3) {
-        // udf3 is order_id
-        await supabase
-          .from("print_orders")
-          .update({
-            payment_method: "PayU Online",
-            payment_status: isPaymentSuccess ? "PAID" : "FAILED",
-            order_status: isPaymentSuccess ? "Queued" : "Payment Failed",
-            payu_txnid: txnid,
-            payu_payment_id: mihpayid,
-          })
-          .eq("id", udf3);
+        if (udf3) {
+          await supabase
+            .from("print_orders")
+            .update({
+              payment_method: "PayU Online",
+              payment_status: isPaymentSuccess ? "PAID" : "FAILED",
+              order_status: isPaymentSuccess ? "Queued" : "Payment Failed",
+              payu_txnid: txnid,
+              payu_payment_id: mihpayid,
+            })
+            .eq("id", udf3);
+        }
       }
 
       // If successful, record instant 0% commission split settlement to shopkeeper
@@ -125,7 +159,9 @@ Deno.serve(async (req) => {
 
       // Redirect back to frontend
       const redirectOrigin = req.headers.get("referer") || req.headers.get("origin") || "https://epyrkfdiozk1.medo.dev";
-      const appUrl = redirectOrigin.split("?")[0].replace(/\/+$/, "");
+      const appUrl = PAYU_APP_URL
+        ? new URL(PAYU_APP_URL).origin
+        : redirectOrigin.split("?")[0].replace(/\/+$/, "");
 
       if (isPaymentSuccess) {
         return Response.redirect(`${appUrl}/?payment_status=success&txnid=${txnid}&order_id=${udf3}&mihpayid=${mihpayid}`, 302);
@@ -158,9 +194,44 @@ Deno.serve(async (req) => {
         user_id = "",
         order_id = "",
         return_url = "",
+        service_mode = "",
       } = body;
 
-      const formattedAmount = Number(amount).toFixed(2);
+      const numericAmount = Number(amount);
+      if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+        return new Response(
+          JSON.stringify({ error: "A positive payment amount is required." }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      if (service_mode === "Self-Service") {
+        if (!shop_id) {
+          return new Response(
+            JSON.stringify({ error: "A shop is required for APM checkout." }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const { data: apmShop, error: apmShopError } = await supabase
+          .from("print_shops")
+          .select("apm_enabled, payment_method_config")
+          .eq("id", shop_id)
+          .maybeSingle();
+
+        if (apmShopError) throw apmShopError;
+        const onlinePaymentAllowed = ["both", "razorpay", "payu", "online"].includes(
+          String(apmShop?.payment_method_config || "").toLowerCase()
+        );
+        if (!apmShop || apmShop.apm_enabled !== true || !onlinePaymentAllowed) {
+          return new Response(
+            JSON.stringify({ error: "This shop does not allow PayU payment for APM service." }),
+            { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+      }
+
+      const formattedAmount = numericAmount.toFixed(2);
       const txnid = "TXN_" + Date.now() + "_" + Math.floor(Math.random() * 90000 + 10000);
 
       // Fetch shop details for 100% direct split routing
@@ -188,7 +259,7 @@ Deno.serve(async (req) => {
       const hash = await computeSha512(hashString);
 
       // Record initiated payment in database
-      await supabase.from("payments").insert({
+      const { error: paymentInsertError } = await supabase.from("payments").insert({
         id: `pay_${txnid}`,
         order_id: order_id || null,
         user_id: user_id || null,
@@ -206,6 +277,7 @@ Deno.serve(async (req) => {
           settlement_type: "PayU Split Settlement (0% Commission)",
         },
       });
+      if (paymentInsertError) throw paymentInsertError;
 
       return new Response(
         JSON.stringify({
@@ -236,7 +308,6 @@ Deno.serve(async (req) => {
       const {
         txnid,
         mihpayid = `mih_${Date.now()}`,
-        status = "success",
         order_id,
         shop_id,
         amount,
@@ -244,28 +315,26 @@ Deno.serve(async (req) => {
       } = body;
 
       // Check existing payment status in DB first
-      const { data: existingPayment } = await supabase
+      const { data: existingPayment, error: paymentLookupError } = await supabase
         .from("payments")
         .select("*")
         .eq("payu_txnid", txnid)
-        .single();
+        .maybeSingle();
+      if (paymentLookupError) throw paymentLookupError;
 
+      const requestedAmount = Number(amount);
+      const paymentAmount = Number(existingPayment?.amount);
+      const requestMatchesOrder = !order_id || order_id === existingPayment?.order_id;
       const isSuccessful =
-        existingPayment?.payment_status === "PAID" ||
-        ["success", "paid"].includes(String(status).toLowerCase());
-
-      // Update payment record
-      await supabase
-        .from("payments")
-        .update({
-          payu_mihpayid: mihpayid,
-          payment_status: isSuccessful ? "PAID" : "FAILED",
-        })
-        .eq("payu_txnid", txnid);
+        existingPayment?.payment_status === "PAID" &&
+        Number.isFinite(requestedAmount) &&
+        requestedAmount === paymentAmount &&
+        (!shop_id || shop_id === existingPayment.shop_id) &&
+        requestMatchesOrder;
 
       // Update print_orders if order_id is present
-      const targetOrderId = order_id || existingPayment?.order_id;
-      if (targetOrderId) {
+      const targetOrderId = existingPayment?.order_id;
+      if (targetOrderId && requestMatchesOrder && isSuccessful) {
         await supabase
           .from("print_orders")
           .update({
@@ -276,31 +345,6 @@ Deno.serve(async (req) => {
             payu_payment_id: mihpayid,
           })
           .eq("id", targetOrderId);
-      }
-
-      // If successful, log 0% commission split settlement
-      const targetShopId = shop_id || existingPayment?.shop_id;
-      if (isSuccessful && targetShopId) {
-        const gross = Number(amount || existingPayment?.amount || 0);
-        const { data: shop } = await supabase
-          .from("print_shops")
-          .select("name, upi_id, bank_account_no")
-          .eq("id", targetShopId)
-          .single();
-
-        await supabase.from("shop_settlements").insert({
-          id: `stl_${Date.now()}_${Math.floor(Math.random() * 900 + 100)}`,
-          shop_id: targetShopId,
-          shop_name: shop?.name || "Shop Partner",
-          total_orders: 1,
-          gross_amount: gross,
-          platform_commission: 0,
-          net_payable: gross,
-          settlement_cycle: "Instant PayU Split Settlement",
-          status: "COMPLETED",
-          bank_account_no: shop?.upi_id || shop?.bank_account_no || "Direct PayU Routed Account",
-          paid_at: new Date().toISOString(),
-        });
       }
 
       // If membership purchase
