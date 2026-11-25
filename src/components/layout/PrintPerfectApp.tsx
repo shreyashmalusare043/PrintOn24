@@ -53,6 +53,7 @@ type ActiveView =
   | 'upload'
   | 'scan'
   | 'checkout'
+  | 'payment_return'
   | 'thermal_receipt'
   | 'report'
   | 'profile'
@@ -90,7 +91,9 @@ const PrintPerfectAppContent: React.FC = () => {
   const startsOnPrivatePrivacyRoute = /^\/app\/privacy\/?$/i.test(window.location.pathname);
   const startsOnPrivateTermsRoute = /^\/app\/(?:terms|terms-and-conditions)\/?$/i.test(window.location.pathname);
   const startsOnPrivateSettingsRoute = /^\/app\/settings\/?$/i.test(window.location.pathname);
-  const initialView: ActiveView = startsOnUploadRoute ? 'upload' : startsOnScanRoute ? 'scan' : startsOnPrivateReportRoute ? 'report' : startsOnPrivatePrivacyRoute ? 'privacy_policy' : startsOnPrivateTermsRoute ? 'terms_conditions' : startsOnPrivateSettingsRoute ? 'settings' : 'home';
+  const paymentStatusOnLoad = new URLSearchParams(window.location.search).get('payment_status');
+  const isPayUReturn = paymentStatusOnLoad === 'success' || paymentStatusOnLoad === 'failed';
+  const initialView: ActiveView = isPayUReturn ? 'payment_return' : startsOnUploadRoute ? 'upload' : startsOnScanRoute ? 'scan' : startsOnPrivateReportRoute ? 'report' : startsOnPrivatePrivacyRoute ? 'privacy_policy' : startsOnPrivateTermsRoute ? 'terms_conditions' : startsOnPrivateSettingsRoute ? 'settings' : 'home';
   const [activeTab, setActiveTab] = useState<TabType>(startsOnUploadRoute ? 'upload' : startsOnPrivateReportRoute ? 'report' : 'home');
   const [currentView, setCurrentView] = useState<ActiveView>(initialView);
   const [isAppDownloadSuggestionOpen, setIsAppDownloadSuggestionOpen] = useState(false);
@@ -274,6 +277,7 @@ const PrintPerfectAppContent: React.FC = () => {
         const pendingOrder = orders.find(order => order.id === orderId);
         if (!pendingOrder) {
           toast.error(`Payment returned successfully, but the pending order could not be found. Contact support with transaction ID ${txnid}.`);
+          setCurrentView('home');
         } else {
           void (async () => {
             const isVerified = await verifyPayUPaymentViaEdge({
@@ -290,6 +294,7 @@ const PrintPerfectAppContent: React.FC = () => {
             });
             if (!isVerified) {
               toast.error('PayU could not confirm this payment yet. The order has not been marked paid.');
+              setCurrentView('home');
               return;
             }
 
@@ -310,6 +315,9 @@ const PrintPerfectAppContent: React.FC = () => {
         }
       } else if (payStatus === 'failed') {
         toast.error(`PayU payment failed: ${errorMsg || 'Transaction declined or cancelled.'}`);
+        setCurrentView('home');
+      } else if (payStatus === 'success') {
+        toast.error('PayU returned an incomplete payment response. Please contact support.');
         setCurrentView('home');
       }
     }
@@ -507,6 +515,18 @@ const PrintPerfectAppContent: React.FC = () => {
 
         {/* Dynamic Page Views */}
         <main className="flex-1 w-full pt-3 md:pt-6">
+          {currentView === 'payment_return' && (
+            <section className="flex min-h-[65vh] items-center justify-center px-4">
+              <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+                <div className="mx-auto mb-5 h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-[#FF1300]" />
+                <h1 className="text-lg font-bold text-slate-900">Confirming your payment</h1>
+                <p className="mt-2 text-sm text-slate-500">
+                  Payment received. Please wait while we verify it and prepare your receipt.
+                </p>
+              </div>
+            </section>
+          )}
+
           {/* 1. Home View */}
           {currentView === 'home' && (
             <>
