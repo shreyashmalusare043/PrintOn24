@@ -19,6 +19,7 @@ const PAYU_ENV = (
   Deno.env.get("PAYU_ENVIRONMENT") ||
   "test"
 ).trim().toLowerCase();
+const PAYU_APP_URL = Deno.env.get("PAYU_APP_URL") || "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY") || "";
 
@@ -158,7 +159,9 @@ Deno.serve(async (req) => {
 
       // Redirect back to frontend
       const redirectOrigin = req.headers.get("referer") || req.headers.get("origin") || "https://epyrkfdiozk1.medo.dev";
-      const appUrl = redirectOrigin.split("?")[0].replace(/\/+$/, "");
+      const appUrl = PAYU_APP_URL
+        ? new URL(PAYU_APP_URL).origin
+        : redirectOrigin.split("?")[0].replace(/\/+$/, "");
 
       if (isPaymentSuccess) {
         return Response.redirect(`${appUrl}/?payment_status=success&txnid=${txnid}&order_id=${udf3}&mihpayid=${mihpayid}`, 302);
