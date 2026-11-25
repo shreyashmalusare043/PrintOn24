@@ -158,17 +158,28 @@ Deno.serve(async (req) => {
       }
 
       // Redirect back to frontend
-      const redirectOrigin = req.headers.get("referer") || req.headers.get("origin") || "https://epyrkfdiozk1.medo.dev";
-      const appUrl = PAYU_APP_URL
-        ? new URL(PAYU_APP_URL).origin
-        : redirectOrigin.split("?")[0].replace(/\/+$/, "");
-
-      if (isPaymentSuccess) {
-        return Response.redirect(`${appUrl}/?payment_status=success&txnid=${txnid}&order_id=${udf3}&mihpayid=${mihpayid}`, 302);
-      } else {
-        const failureReason = encodeURIComponent(errorMsg || "Payment cancelled or rejected by bank");
-        return Response.redirect(`${appUrl}/?payment_status=failed&txnid=${txnid}&order_id=${udf3}&error=${failureReason}`, 302);
+      const configuredAppUrl = PAYU_APP_URL ? new URL(PAYU_APP_URL) : new URL("https://epyrkfdiozk1.medo.dev");
+      const callbackUrl = new URL(configuredAppUrl.origin);
+      if (udf4 && isHashValid && matchesInitiatedPayment) {
+        const requestedReturnUrl = new URL(udf4);
+        const isAllowedReturnProtocol =
+          requestedReturnUrl.protocol === "https:" ||
+          (requestedReturnUrl.protocol === "http:" &&
+            ["localhost", "127.0.0.1"].includes(requestedReturnUrl.hostname));
+        if (isAllowedReturnProtocol) {
+          callbackUrl.href = requestedReturnUrl.href;
+        }
       }
+
+      callbackUrl.searchParams.set("payment_status", isPaymentSuccess ? "success" : "failed");
+      callbackUrl.searchParams.set("txnid", txnid);
+      callbackUrl.searchParams.set("order_id", udf3);
+      if (isPaymentSuccess) {
+        callbackUrl.searchParams.set("mihpayid", mihpayid);
+      } else {
+        callbackUrl.searchParams.set("error", errorMsg || "Payment cancelled or rejected by bank");
+      }
+      return Response.redirect(callbackUrl.toString(), 303);
     } catch (cbErr: any) {
       console.error("Callback processing error:", cbErr);
       return new Response("Payment Callback Error", { status: 500 });
@@ -233,6 +244,32 @@ Deno.serve(async (req) => {
 
       const formattedAmount = numericAmount.toFixed(2);
       const txnid = "TXN_" + Date.now() + "_" + Math.floor(Math.random() * 90000 + 10000);
+      let callbackReturnUrl = "";
+      if (return_url) {
+        const requestOrigin = req.headers.get("origin");
+        let requestedReturnUrl: URL;
+        try {
+          requestedReturnUrl = new URL(String(return_url));
+        } catch {
+          return new Response(
+            JSON.stringify({ error: "The PayU return URL is invalid." }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+        const isAllowedReturnProtocol =
+          requestedReturnUrl.protocol === "https:" ||
+          (requestedReturnUrl.protocol === "http:" &&
+            ["localhost", "127.0.0.1"].includes(requestedReturnUrl.hostname));
+        if (!requestOrigin || requestedReturnUrl.origin !== requestOrigin || !isAllowedReturnProtocol) {
+          return new Response(
+            JSON.stringify({ error: "The PayU return URL must match the checkout origin." }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+        requestedReturnUrl.search = "";
+        requestedReturnUrl.hash = "";
+        callbackReturnUrl = requestedReturnUrl.toString();
+      }
 
       // Fetch shop details for 100% direct split routing
       let shopName = "Print Shop Partner";
@@ -255,7 +292,7 @@ Deno.serve(async (req) => {
 
       // PayU Standard Hash Formula:
       // sha512(key|txnid|amount|productinfo|firstname|email|udf1|udf2|udf3|udf4|udf5||||||SALT)
-      const hashString = `${PAYU_KEY}|${txnid}|${formattedAmount}|${productinfo}|${firstname}|${email}|${shop_id}|${user_id}|${order_id}||||||||${PAYU_SALT}`;
+      const hashString = `${PAYU_KEY}|${txnid}|${formattedAmount}|${productinfo}|${firstname}|${email}|${shop_id}|${user_id}|${order_id}|${callbackReturnUrl}|||||||${PAYU_SALT}`;
       const hash = await computeSha512(hashString);
 
       // Record initiated payment in database
@@ -296,6 +333,7 @@ Deno.serve(async (req) => {
           udf1: shop_id,
           udf2: user_id,
           udf3: order_id,
+          udf4: callbackReturnUrl,
           shop_name: shopName,
           routed_account: routedAccount,
         }),
@@ -307,12 +345,14 @@ Deno.serve(async (req) => {
     if (action === "verify_payment") {
       const {
         txnid,
-        mihpayid = `mih_${Date.now()}`,
+        mihpayid,
+        payu_payment_id,
         order_id,
         shop_id,
         amount,
         membership_id,
       } = body;
+      const verifiedPaymentId = payu_payment_id || mihpayid || `mih_${Date.now()}`;
 
       // Check existing payment status in DB first
       const { data: existingPayment, error: paymentLookupError } = await supabase
@@ -342,7 +382,7 @@ Deno.serve(async (req) => {
             payment_status: isSuccessful ? "PAID" : "FAILED",
             order_status: isSuccessful ? "Queued" : "Payment Failed",
             payu_txnid: txnid,
-            payu_payment_id: mihpayid,
+            payu_payment_id: verifiedPaymentId,
           })
           .eq("id", targetOrderId);
       }
@@ -360,7 +400,7 @@ Deno.serve(async (req) => {
           success: true,
           verified: isSuccessful,
           txnid,
-          mihpayid,
+          mihpayid: verifiedPaymentId,
           order_id: targetOrderId,
           status: isSuccessful ? "PAID" : "FAILED",
         }),

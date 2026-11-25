@@ -1,7 +1,7 @@
 import { App } from '@capacitor/app';
 import { Browser } from '@capacitor/browser';
 import { Capacitor } from '@capacitor/core';
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import {
   INITIAL_ENTERPRISES,
@@ -419,8 +419,11 @@ interface PrintPerfectContextType {
     paymentMethod: PaymentMethod,
     paymentDetail?: string,
     customerName?: string,
-    orderId?: string
+    orderId?: string,
+    paymentPending?: boolean
   ) => PrintOrder;
+  confirmOrderPayment: (orderId: string, paymentDetail: string, txnid: string) => PrintOrder | null;
+  waitForOrderSync: (orderId: string) => Promise<void>;
   notifications: AppNotification[];
   unreadNotifCount: number;
   markNotificationAsRead: (id: string) => void;
@@ -2273,12 +2276,50 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
   }, [orders, user]);
 
   const [activeReceiptOrder, setActiveReceiptOrder] = useState<PrintOrder | null>(null);
+  const pendingOrderSyncs = useRef(new Map<string, Promise<void>>());
+
+  const confirmOrderPayment = (orderId: string, paymentDetail: string, txnid: string): PrintOrder | null => {
+    const pendingOrder = orders.find(order => order.id === orderId);
+    if (!pendingOrder) return null;
+
+    const confirmedOrder: PrintOrder = {
+      ...pendingOrder,
+      paymentStatus: 'PAID',
+      paymentOptionDetail: paymentDetail
+    };
+    setOrders(current => current.map(order => order.id === orderId ? confirmedOrder : order));
+    setActiveReceiptOrder(confirmedOrder);
+    void supabase
+      .from('print_orders')
+      .update({
+        payment_method: 'PayU Online',
+        payment_status: 'PAID',
+        order_status: 'Queued',
+        payu_txnid: txnid
+      })
+      .eq('id', orderId)
+      .then(({ error }) => {
+        if (error) console.error('Unable to sync confirmed PayU order:', error);
+      });
+    return confirmedOrder;
+  };
+
+  const waitForOrderSync = async (orderId: string): Promise<void> => {
+    const sync = pendingOrderSyncs.current.get(orderId);
+    if (!sync) throw new Error('The pending print order was not saved before payment.');
+    try {
+      await sync;
+    } finally {
+      pendingOrderSyncs.current.delete(orderId);
+    }
+  };
 
   const createOrder = (
     paymentMethod: PaymentMethod,
     paymentDetail?: string,
     customerName?: string,
-    orderId?: string
+    orderId?: string,
+    paymentPending = false
   ): PrintOrder => {
     const calc = calculatePrice();
     if (!calc.isValid) {
@@ -2313,7 +2354,7 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
       grandTotal: calc.grandTotal,
       paymentMethod,
       paymentOptionDetail: paymentDetail || (paymentMethod === 'Razorpay' ? 'UPI / Netbanking' : 'Cash at Counter'),
-      paymentStatus: paymentMethod === 'Razorpay' ? 'PAID' : 'PAID', // mark as confirmed paid/authorized for print
+      paymentStatus: paymentPending ? 'PENDING' : 'PAID',
       status: 'Queued',
       createdAt: `${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} • ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`,
       barcode: randomBarcode,
@@ -2338,6 +2379,19 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
     }));
 
     const updated = [newOrder, ...orders];
+    if (paymentPending) {
+      try {
+        const savedOrders = JSON.stringify(updated);
+        if (user.isAuthenticated && !user.isGuest) {
+          localStorage.setItem('printperfect_orders', savedOrders);
+        } else {
+          sessionStorage.setItem('printperfect_guest_orders', savedOrders);
+        }
+      } catch (error) {
+        console.error('Unable to persist pending PayU order before redirect:', error);
+        throw new Error('Unable to save the pending order in this browser. Please retry payment.');
+      }
+    }
     setOrders(updated);
     setActiveReceiptOrder(newOrder);
 
@@ -2440,18 +2494,26 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
         notes: `Customer: ${customerName || user.name} • Token #${tokenNum} • ${newOrder.paymentOptionDetail} • ${allDocs.length} file(s)`
       };
 
-      supabase.from('print_orders').insert(orderPayload).then(async ({ error }) => {
-        if (error && (error.code === '23505' || error.message?.includes('duplicate key'))) {
-          const fallbackOrderNum = `ORD-${Date.now().toString().slice(-6)}${Math.floor(10 + Math.random() * 90)}-${selectedEnterprise.shortCode}`;
-          console.warn('Duplicate order_number detected, retrying with unique order_number:', fallbackOrderNum);
-          await supabase.from('print_orders').insert({
-            ...orderPayload,
-            order_number: fallbackOrderNum
-          });
-        } else if (error) {
-          console.warn('Supabase print_orders sync warning:', error.message);
-        }
-      });
+      const orderSync = Promise.resolve(
+        supabase.from('print_orders').insert(orderPayload).then(async ({ error }) => {
+          if (error && (error.code === '23505' || error.message?.includes('duplicate key'))) {
+            const fallbackOrderNum = `ORD-${Date.now().toString().slice(-6)}${Math.floor(10 + Math.random() * 90)}-${selectedEnterprise.shortCode}`;
+            console.warn('Duplicate order_number detected, retrying with unique order_number:', fallbackOrderNum);
+            const { error: retryError } = await supabase.from('print_orders').insert({
+              ...orderPayload,
+              order_number: fallbackOrderNum
+            });
+            if (retryError) throw retryError;
+          } else if (error) {
+            throw error;
+          }
+        })
+      );
+      if (paymentPending) {
+        pendingOrderSyncs.current.set(newOrder.id, orderSync);
+      } else {
+        void orderSync.catch(error => console.warn('Supabase print_orders sync warning:', error));
+      }
 
       // Persist all documents in Supabase uploaded_documents one by one with order_id, shop_id & independent print_config
       allDocs.forEach(async (doc) => {
@@ -2498,24 +2560,25 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
     }
 
     // Direct progression: Queued -> Completed directly once printed
-    setTimeout(() => {
-      setOrders(current =>
-        current.map(o => o.id === newOrder.id ? { ...o, status: 'Completed' as const } : o)
-      );
-      // Trigger notification
-      const newNotif: AppNotification = {
-        id: `notif_${Date.now()}`,
-        userId: user.id,
-        type: 'print_complete',
-        title: 'Print Completed! 🖨️',
-        message: `${newOrder.document.fileName} is completed and ready at ${newOrder.enterpriseName} counter (Token #${newOrder.tokenNumber}).`,
-        timestamp: 'Just now',
-        read: false,
-        orderId: newOrder.id,
-        enterpriseName: newOrder.enterpriseName
-      };
-      setNotifications(prev => [newNotif, ...prev]);
-    }, 4500);
+    if (!paymentPending) {
+      setTimeout(() => {
+        setOrders(current =>
+          current.map(o => o.id === newOrder.id ? { ...o, status: 'Completed' as const } : o)
+        );
+        const newNotif: AppNotification = {
+          id: `notif_${Date.now()}`,
+          userId: user.id,
+          type: 'print_complete',
+          title: 'Print Completed! 🖨️',
+          message: `${newOrder.document.fileName} is completed and ready at ${newOrder.enterpriseName} counter (Token #${newOrder.tokenNumber}).`,
+          timestamp: 'Just now',
+          read: false,
+          orderId: newOrder.id,
+          enterpriseName: newOrder.enterpriseName
+        };
+        setNotifications(prev => [newNotif, ...prev]);
+      }, 4500);
+    }
 
     // For guest users, reset name after placing order so subsequent visits start fresh
     if (!user.isAuthenticated || user.isGuest) {
@@ -3656,6 +3719,8 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
         activeReceiptOrder,
         setActiveReceiptOrder,
         createOrder,
+        confirmOrderPayment,
+        waitForOrderSync,
         notifications,
         unreadNotifCount,
         markNotificationAsRead,
