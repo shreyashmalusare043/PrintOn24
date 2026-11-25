@@ -21,30 +21,13 @@ import {
   createPayUPaymentViaEdge,
   getShopPrinters,
   recordCounterPaymentViaEdge,
-  type ShopPrinterInfo,
-  verifyPayUPaymentViaEdge
+  type ShopPrinterInfo
 } from '../../services/api';
 import type { PaymentMethod, PrintOrder } from '../../types/printperfect';
 
 interface CheckoutViewProps {
   onBack: () => void;
   onOrderSuccess: (order: PrintOrder) => void;
-}
-
-interface PayUReturnMessage {
-  type: 'payu-payment-return';
-  status: 'success' | 'failed';
-  txnid: string;
-  mihpayid?: string;
-  error?: string;
-}
-
-function isPayUReturnMessage(value: unknown): value is PayUReturnMessage {
-  if (!value || typeof value !== 'object') return false;
-  const message = value as Record<string, unknown>;
-  return message.type === 'payu-payment-return' &&
-    (message.status === 'success' || message.status === 'failed') &&
-    typeof message.txnid === 'string';
 }
 
 export const CheckoutView: React.FC<CheckoutViewProps> = ({
@@ -61,6 +44,7 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
     priceCalc,
     activeMembership,
     createOrder,
+    waitForOrderSync,
     isDocConfigValid,
     user
   } = usePrintPerfect();
@@ -161,8 +145,6 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
   const allowsCounter = shopPaymentConfig === 'both' || shopPaymentConfig === 'counter';
   const allowsOnline = shopPaymentConfig === 'both' || shopPaymentConfig === 'razorpay' || shopPaymentConfig === 'payu';
   const [isProcessing, setIsProcessing] = useState(false);
-  const payuWindowRef = useRef<Window | null>(null);
-  const pendingPayuOrderIdRef = useRef<string | null>(null);
   const goForPrintButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -200,18 +182,10 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
     }
 
     if (paymentMethod === 'PayU') {
-      const paymentWindow = window.open('', '_blank');
-      if (!paymentWindow) {
-        toast.error('Allow pop-ups to continue to PayU payment.');
-        return;
-      }
-
-      payuWindowRef.current = paymentWindow;
       setIsProcessing(true);
       try {
         toast.info('Connecting to PayU Split Settlement Gateway...');
         const orderId = `ord_${Date.now()}_${Math.floor(100 + Math.random() * 900)}`;
-        pendingPayuOrderIdRef.current = orderId;
         const payuRes = await createPayUPaymentViaEdge({
           amount: priceCalc.grandTotal,
           productinfo: `${currentDoc?.fileName || 'Print Job'} - ${selectedEnterprise.name}`,
@@ -224,10 +198,10 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
           service_mode: selectedEnterprise.apmEnabled === true &&
             (selectedEnterprise.softwareServiceEnabled === false || printConfig.serviceMode === 'Self-Service')
             ? 'Self-Service'
-            : undefined
+            : undefined,
+          return_url: `${window.location.origin}${window.location.pathname}`
         });
 
-        setIsProcessing(false);
         const fields: Record<string, string> = {
           key: payuRes.key,
           txnid: payuRes.txnid,
@@ -241,15 +215,14 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
           hash: payuRes.hash,
           udf1: payuRes.udf1 || selectedEnterprise.id,
           udf2: payuRes.udf2 || user.id,
-          udf3: payuRes.udf3 || orderId
+          udf3: payuRes.udf3 || orderId,
+          udf4: payuRes.udf4 || ''
         };
-        const targetName = `payu_${payuRes.txnid}`;
-        paymentWindow.name = targetName;
 
         const form = document.createElement('form');
         form.method = 'POST';
         form.action = payuRes.payu_url;
-        form.target = targetName;
+        form.target = '_self';
         Object.entries(fields).forEach(([name, value]) => {
           const input = document.createElement('input');
           input.type = 'hidden';
@@ -258,13 +231,12 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
           form.appendChild(input);
         });
 
+        createOrder('PayU', 'Payment pending', undefined, orderId, true);
+        await waitForOrderSync(orderId);
         document.body.appendChild(form);
         form.submit();
         form.remove();
       } catch (err) {
-        paymentWindow.close();
-        payuWindowRef.current = null;
-        pendingPayuOrderIdRef.current = null;
         setIsProcessing(false);
         console.error('PayU initialization error:', err);
         toast.error(
@@ -297,78 +269,6 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
       onOrderSuccess(order);
     }
   };
-
-  const handlePayUSuccess = async (paymentInfo: { txnid: string; mihpayid: string; method: string }) => {
-    if (!pendingPayuOrderIdRef.current) {
-      toast.error('Could not match this PayU payment to the pending print order.');
-      return;
-    }
-
-    setIsProcessing(true);
-    toast.info('Verifying transaction with PayU...');
-    try {
-      const isVerified = await verifyPayUPaymentViaEdge({
-        txnid: paymentInfo.txnid,
-        amount: priceCalc.grandTotal,
-        productinfo: `${currentDoc?.fileName || 'Print Job'} - ${selectedEnterprise.name}`,
-        firstname: user.name || 'Customer',
-        email: user.email || 'customer@printon24.io',
-        status: 'success',
-        payu_payment_id: paymentInfo.mihpayid,
-        shop_id: selectedEnterprise.id,
-        user_id: user.id,
-        order_id: pendingPayuOrderIdRef.current
-      });
-
-      setIsProcessing(false);
-      if (isVerified) {
-        const order = createOrder(
-          'PayU',
-          `${paymentInfo.method} • Txn: ${paymentInfo.txnid.slice(-8)}`,
-          undefined,
-          pendingPayuOrderIdRef.current
-        );
-        pendingPayuOrderIdRef.current = null;
-        payuWindowRef.current = null;
-        toast.success(`Payment verified! ₹${priceCalc.grandTotal.toFixed(2)} paid to ${selectedEnterprise.name}.`);
-        onOrderSuccess(order);
-      } else {
-        toast.error('PayU payment is not confirmed yet. Your order has not been placed.');
-      }
-    } catch (err) {
-      setIsProcessing(false);
-      toast.error(
-        `Payment verification failed: ${err instanceof Error ? err.message : 'Please try again.'}`
-      );
-    }
-  };
-
-  useEffect(() => {
-    const handlePayUReturn = (event: MessageEvent<unknown>) => {
-      if (
-        event.origin !== window.location.origin ||
-        event.source !== payuWindowRef.current ||
-        !isPayUReturnMessage(event.data)
-      ) {
-        return;
-      }
-
-      if (event.data.status === 'success') {
-        void handlePayUSuccess({
-          txnid: event.data.txnid,
-          mihpayid: event.data.mihpayid || '',
-          method: 'PayU'
-        });
-      } else {
-        pendingPayuOrderIdRef.current = null;
-        payuWindowRef.current = null;
-        toast.error(`PayU payment failed: ${event.data.error || 'Transaction cancelled.'}`);
-      }
-    };
-
-    window.addEventListener('message', handlePayUReturn);
-    return () => window.removeEventListener('message', handlePayUReturn);
-  }, [handlePayUSuccess]);
 
   return (
     <div className="space-y-4 pb-28 px-4 max-w-lg mx-auto">

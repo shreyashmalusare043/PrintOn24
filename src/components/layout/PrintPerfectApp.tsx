@@ -5,6 +5,7 @@ import { PrintPerfectContext, PrintPerfectProvider, usePrintPerfect } from '../.
 import { APP_DOWNLOAD_SUGGESTION_KEY } from '../../lib/appLinks';
 import { type AndroidPermissionName, AppPermissions } from '../../native/appPermissions';
 import { type SharedFile, SharedFiles, type SharedFilesResult } from '../../native/sharedFiles';
+import { verifyPayUPaymentViaEdge } from '../../services/api';
 import type { PrintOrder } from '../../types/printperfect';
 import { AuthModal } from '../auth/AuthModal';
 import { CheckoutView } from '../checkout/CheckoutView';
@@ -52,6 +53,7 @@ type ActiveView =
   | 'upload'
   | 'scan'
   | 'checkout'
+  | 'payment_return'
   | 'thermal_receipt'
   | 'report'
   | 'profile'
@@ -71,6 +73,7 @@ const PrintPerfectAppContent: React.FC = () => {
   const {
     activeReceiptOrder,
     setActiveReceiptOrder,
+    confirmOrderPayment,
     selectEnterprise,
     selectedEnterprise,
     verifyAndSelectShopByCode,
@@ -88,7 +91,9 @@ const PrintPerfectAppContent: React.FC = () => {
   const startsOnPrivatePrivacyRoute = /^\/app\/privacy\/?$/i.test(window.location.pathname);
   const startsOnPrivateTermsRoute = /^\/app\/(?:terms|terms-and-conditions)\/?$/i.test(window.location.pathname);
   const startsOnPrivateSettingsRoute = /^\/app\/settings\/?$/i.test(window.location.pathname);
-  const initialView: ActiveView = startsOnUploadRoute ? 'upload' : startsOnScanRoute ? 'scan' : startsOnPrivateReportRoute ? 'report' : startsOnPrivatePrivacyRoute ? 'privacy_policy' : startsOnPrivateTermsRoute ? 'terms_conditions' : startsOnPrivateSettingsRoute ? 'settings' : 'home';
+  const paymentStatusOnLoad = new URLSearchParams(window.location.search).get('payment_status');
+  const isPayUReturn = paymentStatusOnLoad === 'success' || paymentStatusOnLoad === 'failed';
+  const initialView: ActiveView = isPayUReturn ? 'payment_return' : startsOnUploadRoute ? 'upload' : startsOnScanRoute ? 'scan' : startsOnPrivateReportRoute ? 'report' : startsOnPrivatePrivacyRoute ? 'privacy_policy' : startsOnPrivateTermsRoute ? 'terms_conditions' : startsOnPrivateSettingsRoute ? 'settings' : 'home';
   const [activeTab, setActiveTab] = useState<TabType>(startsOnUploadRoute ? 'upload' : startsOnPrivateReportRoute ? 'report' : 'home');
   const [currentView, setCurrentView] = useState<ActiveView>(initialView);
   const [isAppDownloadSuggestionOpen, setIsAppDownloadSuggestionOpen] = useState(false);
@@ -104,6 +109,7 @@ const PrintPerfectAppContent: React.FC = () => {
   const [selectedDrawerSection, setSelectedDrawerSection] = useState<string | null>(null);
   const [shortReceiptOrder, setShortReceiptOrder] = useState<PrintOrder | null>(null);
   const handledSharePayloads = React.useRef(new Set<string>());
+  const handledPayUReturn = React.useRef<string | null>(null);
 
   const openAppDownloadSuggestion = useCallback(() => {
     if (isWeb && localStorage.getItem(APP_DOWNLOAD_SUGGESTION_KEY) !== 'true') {
@@ -255,46 +261,65 @@ const PrintPerfectAppContent: React.FC = () => {
     if (mainContainer) mainContainer.scrollTop = 0;
   }, [currentView, activeTab]);
 
-  // Check for PayU Gateway return parameters (?payment_status=success/failed)
+  // Verify PayU return parameters and open the locally saved order receipt.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const payStatus = params.get('payment_status');
     const txnid = params.get('txnid');
     const orderId = params.get('order_id');
     const errorMsg = params.get('error');
-    const reportPayUReturnToCheckout = (status: 'success' | 'failed') => {
-      if (!window.opener || window.opener.closed) return false;
-
-      window.opener.postMessage({
-        type: 'payu-payment-return',
-        status,
-        txnid: txnid || '',
-        mihpayid: params.get('mihpayid') || '',
-        error: errorMsg ? decodeURIComponent(errorMsg) : ''
-      }, window.location.origin);
+    const paymentReturnKey = `${payStatus}:${txnid}:${orderId}`;
+    if (payStatus && handledPayUReturn.current !== paymentReturnKey) {
+      handledPayUReturn.current = paymentReturnKey;
       window.history.replaceState({}, '', window.location.pathname);
-      window.close();
-      return true;
-    };
 
-    if (payStatus === 'success') {
-      if (reportPayUReturnToCheckout('success')) return;
-      window.history.replaceState({}, '', window.location.pathname);
-      const matched = orders.find(o => o.id === orderId || (txnid && o.paymentOptionDetail?.includes(txnid)));
-      if (matched) {
-        toast.success(`Payment verified via PayU! Txn: ${txnid ? txnid.slice(-8) : 'Confirmed'}`);
-        setActiveReceiptOrder(matched);
-        setCurrentView('thermal_receipt');
-        scheduleAppDownloadSuggestion();
-      } else {
-        toast.success('PayU payment verified. Return to your checkout tab and select “Check Verification” to place the order.');
-        setCurrentView('checkout');
+      if (payStatus === 'success' && txnid && orderId) {
+        const pendingOrder = orders.find(order => order.id === orderId);
+        if (!pendingOrder) {
+          toast.error(`Payment returned successfully, but the pending order could not be found. Contact support with transaction ID ${txnid}.`);
+          setCurrentView('home');
+        } else {
+          void (async () => {
+            const isVerified = await verifyPayUPaymentViaEdge({
+              txnid,
+              amount: pendingOrder.grandTotal,
+              productinfo: pendingOrder.document.fileName,
+              firstname: pendingOrder.customerName || 'Customer',
+              email: 'customer@printon24.io',
+              status: 'success',
+              payu_payment_id: params.get('mihpayid') || undefined,
+              order_id: orderId,
+              shop_id: pendingOrder.enterpriseId,
+              user_id: pendingOrder.userId
+            });
+            if (!isVerified) {
+              toast.error('PayU could not confirm this payment yet. The order has not been marked paid.');
+              setCurrentView('home');
+              return;
+            }
+
+            const confirmedOrder = confirmOrderPayment(
+              orderId,
+              `PayU • Txn: ${txnid.slice(-8)}`,
+              txnid
+            );
+            if (!confirmedOrder) {
+              toast.error(`Payment was confirmed, but the order could not be loaded. Contact support with transaction ID ${txnid}.`);
+              return;
+            }
+            toast.success(`Payment completed! Receipt generated for ${confirmedOrder.enterpriseName}.`);
+            setActiveReceiptOrder(confirmedOrder);
+            setCurrentView('thermal_receipt');
+            scheduleAppDownloadSuggestion();
+          })();
+        }
+      } else if (payStatus === 'failed') {
+        toast.error(`PayU payment failed: ${errorMsg || 'Transaction declined or cancelled.'}`);
+        setCurrentView('home');
+      } else if (payStatus === 'success') {
+        toast.error('PayU returned an incomplete payment response. Please contact support.');
+        setCurrentView('home');
       }
-    } else if (payStatus === 'failed') {
-      if (reportPayUReturnToCheckout('failed')) return;
-      toast.error(`PayU Payment Failed or Cancelled: ${errorMsg ? decodeURIComponent(errorMsg) : 'Transaction declined'}`);
-      window.history.replaceState({}, '', window.location.pathname);
-      setCurrentView('checkout');
     }
 
     const shopLinkMatch = window.location.pathname.match(/^\/(?:shopkeeper|shop|terminal|counter)\/([^/]+)\/?$/i);
@@ -330,7 +355,7 @@ const PrintPerfectAppContent: React.FC = () => {
       console.error('Unable to connect shop from URL:', error);
       toast.error('Unable to verify this shop right now. Please try again.');
     });
-  }, [orders, verifyAndSelectShopByCode, scheduleAppDownloadSuggestion]);
+  }, [orders, confirmOrderPayment, setActiveReceiptOrder, verifyAndSelectShopByCode, scheduleAppDownloadSuggestion]);
 
 
   // BottomNav tab change (Mobile)
@@ -490,6 +515,18 @@ const PrintPerfectAppContent: React.FC = () => {
 
         {/* Dynamic Page Views */}
         <main className="flex-1 w-full pt-3 md:pt-6">
+          {currentView === 'payment_return' && (
+            <section className="flex min-h-[65vh] items-center justify-center px-4">
+              <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+                <div className="mx-auto mb-5 h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-[#FF1300]" />
+                <h1 className="text-lg font-bold text-slate-900">Confirming your payment</h1>
+                <p className="mt-2 text-sm text-slate-500">
+                  Payment received. Please wait while we verify it and prepare your receipt.
+                </p>
+              </div>
+            </section>
+          )}
+
           {/* 1. Home View */}
           {currentView === 'home' && (
             <>

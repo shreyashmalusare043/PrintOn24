@@ -1112,6 +1112,7 @@ export interface PayUInitiationResult {
   udf1?: string;
   udf2?: string;
   udf3?: string;
+  udf4?: string;
   split_settlement_info?: any;
 }
 
@@ -1125,6 +1126,7 @@ export async function createPayUPaymentViaEdge(payload: {
   shop_id?: string;
   user_id?: string;
   service_mode?: 'Self-Service' | 'Counter';
+  return_url?: string;
 }): Promise<PayUInitiationResult> {
   try {
     const { data, error } = await supabase.functions.invoke('payu-checkout', {
@@ -1138,7 +1140,8 @@ export async function createPayUPaymentViaEdge(payload: {
         order_id: payload.order_id,
         shop_id: payload.shop_id,
         user_id: payload.user_id,
-        service_mode: payload.service_mode
+        service_mode: payload.service_mode,
+        return_url: payload.return_url
       }
     });
 
@@ -1169,6 +1172,7 @@ export async function createPayUPaymentViaEdge(payload: {
       udf1: data.udf1,
       udf2: data.udf2,
       udf3: data.udf3,
+      udf4: data.udf4,
       split_settlement_info: data.split_settlement_info
     };
   } catch (err) {
