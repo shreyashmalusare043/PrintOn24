@@ -1,23 +1,23 @@
-import React, { useState, useEffect } from 'react';
+import {
+  AlertTriangle,
+  ArrowRight,
+  CheckCircle2,
+  ExternalLink,
+  Loader2,
+  Lock,
+  RefreshCw,
+  ShieldCheck,
+  XCircle
+} from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { toast } from 'sonner';
+import { verifyPayUPaymentViaEdge } from '../../services/api';
 import {
   Dialog,
   DialogContent,
-  DialogTitle,
-  DialogDescription
+  DialogDescription,
+  DialogTitle
 } from '../ui/dialog';
-import {
-  ShieldCheck,
-  Lock,
-  ArrowRight,
-  AlertTriangle,
-  Loader2,
-  ExternalLink,
-  CheckCircle2,
-  XCircle,
-  RefreshCw
-} from 'lucide-react';
-import { verifyPayUPaymentViaEdge } from '../../services/api';
-import { toast } from 'sonner';
 
 export interface PayUData {
   key: string;
@@ -77,7 +77,7 @@ export const PayUCheckoutModal: React.FC<PayUCheckoutModalProps> = ({
       const form = document.createElement('form');
       form.method = 'POST';
       form.action = targetPayUUrl;
-      form.target = '_self'; // Redirect to PayU payment gateway
+      form.target = '_blank';
 
       const fields: Record<string, string> = {
         key: payuData.key,
@@ -105,6 +105,8 @@ export const PayUCheckoutModal: React.FC<PayUCheckoutModalProps> = ({
 
       document.body.appendChild(form);
       form.submit();
+      form.remove();
+      setIsRedirecting(false);
     } catch (err: any) {
       setIsRedirecting(false);
       setPaymentError(`Failed to connect to PayU Gateway: ${err.message}`);
@@ -216,6 +218,9 @@ export const PayUCheckoutModal: React.FC<PayUCheckoutModalProps> = ({
             </div>
             <p className="text-[10px] text-slate-400 mt-1">
               Gateway Target: <code className="text-slate-600 font-mono">{targetPayUUrl}</code>
+            </p>
+            <p className="text-[10px] text-slate-500">
+              After paying in the new tab, return here and select “Check Verification” to place your order.
             </p>
           </div>
 

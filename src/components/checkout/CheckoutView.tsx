@@ -55,6 +55,9 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
   const [isLoadingPaymentConfig, setIsLoadingPaymentConfig] = useState<boolean>(true);
   const [shopPaymentConfig, setShopPaymentConfig] = useState<string>('counter');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('Pay on Counter');
+  const isApmOnlyShop =
+    selectedEnterprise.apmEnabled === true &&
+    selectedEnterprise.softwareServiceEnabled === false;
 
   const [shopPrintersList, setShopPrintersList] = useState<ShopPrinterInfo[]>([]);
   const [capabilityWarning, setCapabilityWarning] = useState<string | null>(null);
@@ -73,7 +76,9 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
           .maybeSingle();
 
         if (!isMounted) return;
-        const cfg = data?.payment_method_config || selectedEnterprise.paymentMethodConfig || 'counter';
+        const cfg = isApmOnlyShop
+          ? 'payu'
+          : data?.payment_method_config || selectedEnterprise.paymentMethodConfig || 'counter';
         setShopPaymentConfig(cfg);
         if (cfg === 'counter') {
           setPaymentMethod('Pay on Counter');
@@ -84,7 +89,9 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
         }
       } catch {
         if (!isMounted) return;
-        const fallback = selectedEnterprise.paymentMethodConfig || 'counter';
+        const fallback = isApmOnlyShop
+          ? 'payu'
+          : selectedEnterprise.paymentMethodConfig || 'counter';
         setShopPaymentConfig(fallback);
         if (fallback === 'counter') {
           setPaymentMethod('Pay on Counter');
@@ -135,12 +142,10 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [selectedEnterprise.id, uploadedDocs, printConfig]);
+  }, [selectedEnterprise.id, isApmOnlyShop, uploadedDocs, printConfig]);
 
   const allowsCounter = shopPaymentConfig === 'both' || shopPaymentConfig === 'counter';
   const allowsOnline = shopPaymentConfig === 'both' || shopPaymentConfig === 'razorpay' || shopPaymentConfig === 'payu';
-  const [razorpayOption, setRazorpayOption] = useState<'UPI' | 'Card' | 'Netbanking' | 'Wallet'>('UPI');
-  const [upiId, setUpiId] = useState('shreyash@okaxis');
   const [isProcessing, setIsProcessing] = useState(false);
 
   // PayU Modal state
@@ -186,20 +191,26 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
       setIsProcessing(true);
       try {
         toast.info('Connecting to PayU Split Settlement Gateway...');
+        const orderId = `ord_${Date.now()}_${Math.floor(100 + Math.random() * 900)}`;
         const payuRes = await createPayUPaymentViaEdge({
           amount: priceCalc.grandTotal,
           productinfo: `${currentDoc?.fileName || 'Print Job'} - ${selectedEnterprise.name}`,
           firstname: user.name || 'Customer',
           email: user.email || 'customer@printon24.io',
           phone: user.phone || '9876543210',
+          order_id: orderId,
           shop_id: selectedEnterprise.id,
-          user_id: user.id
+          user_id: user.id,
+          service_mode: selectedEnterprise.apmEnabled === true &&
+            (selectedEnterprise.softwareServiceEnabled === false || printConfig.serviceMode === 'Self-Service')
+            ? 'Self-Service'
+            : undefined
         });
 
         setIsProcessing(false);
-        if (payuRes && payuRes.txnid) {
+        if (payuRes.txnid) {
           setPayuModalData({
-            key: payuRes.key || 'nD7EiA',
+            key: payuRes.key,
             txnid: payuRes.txnid,
             amount: String(priceCalc.grandTotal),
             productinfo: `${currentDoc?.fileName || 'Print Job'} - ${selectedEnterprise.name}`,
@@ -210,9 +221,9 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
             furl: payuRes.furl,
             hash: payuRes.hash,
             payu_url: payuRes.payu_url,
-            udf1: selectedEnterprise.id,
-            udf2: user.id,
-            udf3: payuRes.txnid,
+            udf1: payuRes.udf1 || selectedEnterprise.id,
+            udf2: payuRes.udf2 || user.id,
+            udf3: payuRes.udf3 || '',
             shop_name: selectedEnterprise.name
           });
           setIsPayuModalOpen(true);
@@ -222,7 +233,11 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
       } catch (err: any) {
         setIsProcessing(false);
         console.error('PayU initialization error:', err);
-        toast.error('PayU Gateway connection error. Please try again or select Pay on Counter.');
+        toast.error(
+          err instanceof Error
+            ? `Unable to initialize PayU payment: ${err.message}`
+            : 'PayU Gateway connection error. Please try again.'
+        );
       }
       return;
     }
@@ -263,14 +278,20 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
         payu_hash: payuModalData?.hash || '',
         payu_payment_id: paymentInfo.mihpayid,
         shop_id: selectedEnterprise.id,
-        user_id: user.id
+        user_id: user.id,
+        order_id: payuModalData?.udf3
       });
 
       setIsProcessing(false);
       setIsPayuModalOpen(false);
 
       if (isVerified) {
-        const order = createOrder('PayU', `${paymentInfo.method} • Txn: ${paymentInfo.txnid.slice(-8)}`);
+        const order = createOrder(
+          'PayU',
+          `${paymentInfo.method} • Txn: ${paymentInfo.txnid.slice(-8)}`,
+          undefined,
+          payuModalData?.udf3
+        );
         toast.success(`Payment verified via PayU! ₹${priceCalc.grandTotal.toFixed(2)} routed to ${selectedEnterprise.name}.`);
         onOrderSuccess(order);
       } else {
@@ -477,45 +498,6 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
                   </div>
                 </div>
 
-                {/* Sub options for PayU */}
-                {paymentMethod === 'PayU' && (
-                  <div className="mt-3 pt-3 border-t border-red-100 space-y-2">
-                    <div className="flex items-center gap-2">
-                      {(['UPI', 'Card', 'Netbanking', 'Wallet'] as const).map(opt => (
-                        <button
-                          key={opt}
-                          type="button"
-                          onClick={e => {
-                            e.stopPropagation();
-                            setRazorpayOption(opt);
-                          }}
-                          className={`px-3 py-1 rounded-xl text-xs font-bold transition-all ${
-                            razorpayOption === opt
-                              ? 'bg-[#FF1300] text-white shadow-xs font-heading'
-                              : 'bg-white border border-slate-200 text-slate-600'
-                          }`}
-                        >
-                          {opt}
-                        </button>
-                      ))}
-                    </div>
-
-                    {razorpayOption === 'UPI' && (
-                      <div className="flex items-center gap-2 pt-1" onClick={e => e.stopPropagation()}>
-                        <input
-                          type="text"
-                          value={upiId}
-                          onChange={e => setUpiId(e.target.value)}
-                          placeholder="Enter UPI ID (e.g. name@okhdfcbank)"
-                          className="flex-1 bg-white border border-red-200 rounded-xl px-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-[#FF1300]"
-                        />
-                        <span className="text-[10px] text-emerald-600 font-bold shrink-0">
-                          PayU Verified ✓
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                )}
               </div>
             )}
 

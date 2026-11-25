@@ -37,6 +37,7 @@ import { toast } from 'sonner';
 import { usePrintPerfect } from '../../contexts/PrintPerfectContext';
 import { supabase } from '../../db/supabase';
 import { getPrintModeEligibility, type PrintSides, type PrintType } from '../../lib/printEligibility';
+import { getApmPrintModeEligibility, getShopServiceModeAccess, isBackToBackRestrictedByPageCount, isServiceModePrintSettingEligible, type ShopServiceMode } from '../../lib/shopApmMode';
 import { fetchUploadPageAds, getShopAvailablePaperSizes, getShopPaperPricingDetails, type UploadPageAdItem } from '../../services/api';
 import type { CustomPageRangeRule, ImageEditingState, UploadedDoc } from '../../types/printperfect';
 import { formatFullName } from '../../utils/nameFormat';
@@ -118,6 +119,19 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
   const updatePrintConfig = (updates: Parameters<typeof updatePrintConfigContext>[0]) => {
     updatePrintConfigContext(updates);
   };
+  const apmAccess = getShopServiceModeAccess(selectedEnterprise);
+  const [serviceMode, setServiceMode] = useState<ShopServiceMode>(
+    apmAccess.defaultMode
+  );
+  const hasApmMode = apmAccess.showModeSelector;
+  useEffect(() => {
+    setServiceMode(apmAccess.defaultMode);
+    updatePrintConfig({ serviceMode: apmAccess.defaultMode });
+  }, [selectedEnterprise.id, apmAccess.defaultMode]);
+  const handleServiceModeChange = (mode: ShopServiceMode) => {
+    setServiceMode(mode);
+    updatePrintConfig({ serviceMode: mode });
+  };
 
   // Fresh Upload Session: clear any previous/recent documents when entering upload view
   useEffect(() => {
@@ -163,6 +177,10 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
   }, [printConfig.pageRangeType, printConfig.selectedPageRange, currentDoc?.totalPages]);
 
   const isSinglePageSingleCopy = isSelectedRangeSinglePage && printConfig.copies <= 1;
+  const isBackToBackDisabledByPageCount = isBackToBackRestrictedByPageCount(
+    serviceMode,
+    isSinglePageSingleCopy
+  );
 
   // Requirement 2.3: Selected Pages eligibility:
   // If user uploads a single page then selected page option should be disabled.
@@ -191,10 +209,10 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
   }, [isSelectedPagesEligible, printConfig.pageRangeType]);
 
   useEffect(() => {
-    if (isSinglePageSingleCopy && printConfig.sides === 'Back to Back') {
+    if (isBackToBackDisabledByPageCount && printConfig.sides === 'Back to Back') {
       updatePrintConfig({ sides: 'Single Side' });
     }
-  }, [isSinglePageSingleCopy, printConfig.sides]);
+  }, [isBackToBackDisabledByPageCount, printConfig.sides]);
 
   // Point 7: Enforce Back-to-Back rule in Custom Range
   // If startPage === endPage (1 page) and copies <= 1, Back-to-Back is disabled and reset to Single Side
@@ -204,7 +222,13 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
       const updated = printConfig.customRanges.map(r => {
         const f = Number(r.fromPage);
         const t = Number(r.toPage);
-        if (!isNaN(f) && !isNaN(t) && f === t && printConfig.copies <= 1 && r.sides === 'Back to Back') {
+        if (
+          isBackToBackRestrictedByPageCount(
+            serviceMode,
+            !isNaN(f) && !isNaN(t) && f === t && printConfig.copies <= 1
+          ) &&
+          r.sides === 'Back to Back'
+        ) {
           changed = true;
           return { ...r, sides: 'Single Side' as const };
         }
@@ -214,7 +238,7 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
         updatePrintConfig({ customRanges: updated });
       }
     }
-  }, [printConfig.customRanges, printConfig.copies]);
+  }, [printConfig.customRanges, printConfig.copies, serviceMode]);
 
   // Terms and Conditions Modal State
   const [isTermsModalOpen, setIsTermsModalOpen] = useState(false);
@@ -708,7 +732,13 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
       const next = { ...r, ...updates };
       const f = Number(next.fromPage);
       const t = Number(next.toPage);
-      if (!isNaN(f) && !isNaN(t) && f === t && printConfig.copies <= 1 && next.sides === 'Back to Back') {
+      if (
+        isBackToBackRestrictedByPageCount(
+          serviceMode,
+          !isNaN(f) && !isNaN(t) && f === t && printConfig.copies <= 1
+        ) &&
+        next.sides === 'Back to Back'
+      ) {
         next.sides = 'Single Side';
       }
       return next;
@@ -768,6 +798,11 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
       : printConfig.sides === 'Single Side' || printConfig.sides === 'Single-sided'
       ? 'Single Side'
       : '';
+  const selectablePaperSizes = availablePaperSizes;
+  const apmPrintModeEligibility = React.useMemo(
+    () => getApmPrintModeEligibility(selectedEnterprise.apmMachineTypes),
+    [selectedEnterprise.apmMachineTypes]
+  );
   const printModeEligibility = getPrintModeEligibility(
     selectedEnterprise.pricing,
     printConfig.paperType && printConfig.paperType !== 'Normal'
@@ -775,8 +810,16 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
       : printConfig.pageSize || ''
   );
   const isEligibilityReady = selectedEnterprise.pricing.eligibilitySettingsLoaded === true;
+  const isConfigurationEligibilityReady = serviceMode === 'Self-Service'
+    ? true
+    : isEligibilityReady;
   const isPrintModeSelectable = (type: PrintType, sides: PrintSides) =>
-    !isEligibilityReady || printModeEligibility[type][sides];
+    isServiceModePrintSettingEligible(
+      serviceMode,
+      isEligibilityReady,
+      printModeEligibility[type][sides],
+      apmPrintModeEligibility[type][sides]
+    );
   const hasSelectablePrintType = (type: PrintType) =>
     currentPrintSide
       ? isPrintModeSelectable(type, currentPrintSide as PrintSides)
@@ -785,6 +828,59 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
     currentPrintType
       ? isPrintModeSelectable(currentPrintType as PrintType, side)
       : isPrintModeSelectable('Color', side) || isPrintModeSelectable('Black & White', side);
+  const hideUnavailableApmOptions =
+    serviceMode === 'Self-Service' && selectedEnterprise.apmEnabled === true;
+  const isPrintTypeVisible = (type: PrintType) =>
+    !hideUnavailableApmOptions ||
+    apmPrintModeEligibility[type]['Single Side'] ||
+    apmPrintModeEligibility[type]['Back to Back'];
+
+  useEffect(() => {
+    if (serviceMode === 'Counter' && !isEligibilityReady) return;
+
+    const updates: Partial<typeof printConfig> = {};
+    if (
+      serviceMode === 'Self-Service' &&
+      !selectablePaperSizes.includes(printConfig.pageSize)
+    ) {
+      updates.pageSize = (selectablePaperSizes[0] || '') as typeof printConfig.pageSize;
+    }
+
+    const selectedType = currentPrintType as PrintType | '';
+    const selectedSide = currentPrintSide as PrintSides | '';
+    const isCurrentSelectionEligible = selectedType && selectedSide &&
+      isPrintModeSelectable(selectedType, selectedSide) &&
+      !(selectedSide === 'Back to Back' && isBackToBackDisabledByPageCount);
+    if (selectedType && selectedSide && !isCurrentSelectionEligible) {
+      const eligibleOption = (
+        [
+          ['Black & White', 'Single Side'],
+          ['Black & White', 'Back to Back'],
+          ['Color', 'Single Side'],
+          ['Color', 'Back to Back']
+        ] as Array<[PrintType, PrintSides]>
+      ).find(([type, sides]) =>
+        isPrintModeSelectable(type, sides) &&
+        !(sides === 'Back to Back' && isBackToBackDisabledByPageCount)
+      );
+
+      updates.printType = eligibleOption?.[0] || '';
+      updates.sides = eligibleOption?.[1] || 'Single Side';
+    }
+
+    if (Object.keys(updates).length > 0) {
+      updatePrintConfig(updates);
+    }
+  }, [
+    serviceMode,
+    isEligibilityReady,
+    isBackToBackDisabledByPageCount,
+    selectablePaperSizes,
+    printConfig.pageSize,
+    currentPrintType,
+    currentPrintSide,
+    apmPrintModeEligibility
+  ]);
 
   return (
     <div className="w-full max-w-7xl mx-auto px-4 lg:px-6 pb-28 select-none font-sans">
@@ -1214,6 +1310,29 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
           </div>
         )}
 
+        {hasApmMode && (
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs font-bold text-slate-800 font-heading">Select Mode</p>
+            <div className="flex items-center gap-1.5 bg-slate-100 p-0.5 rounded-xl">
+              {(['Self-Service', 'Counter'] as const).map(mode => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => handleServiceModeChange(mode)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                      serviceMode === mode
+                        ? 'bg-white text-[#FF1300] shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                    aria-pressed={serviceMode === mode}
+                  >
+                    {mode}
+                  </button>
+                ))}
+            </div>
+          </div>
+        )}
+
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-lg bg-red-100 text-[#FF1300] flex items-center justify-center">
             <Settings2 className="w-4 h-4 stroke-[2.2]" />
@@ -1253,11 +1372,11 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                 <option value="" disabled>
                   {isLoadingPaperSizes
                     ? 'Loading shop paper sizes...'
-                    : availablePaperSizes.length === 0
+                    : selectablePaperSizes.length === 0
                     ? 'No paper sizes available for this shop'
                     : '-- Select Page Size --'}
                 </option>
-                {availablePaperSizes.map(size => (
+                {selectablePaperSizes.map(size => (
                   <option key={size} value={size}>
                     {size}
                   </option>
@@ -1387,13 +1506,15 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
               </div>
 
               <div className={`flex items-center gap-1.5 bg-slate-100 p-0.5 rounded-xl shrink-0 ${isCustomRange ? 'pointer-events-none' : ''}`}>
-                {(['Single Side', 'Back to Back'] as const).map(side => {
+                {(['Single Side', 'Back to Back'] as const)
+                  .filter(side => !hideUnavailableApmOptions || hasSelectablePrintSide(side))
+                  .map(side => {
                   const isSelectableForSelectedType = hasSelectablePrintSide(side);
                   const isSideDisabled =
                     isCustomRange ||
-                    !isEligibilityReady ||
+                    !isConfigurationEligibilityReady ||
                     !isSelectableForSelectedType ||
-                    (side === 'Back to Back' && isSinglePageSingleCopy);
+                    (side === 'Back to Back' && isBackToBackDisabledByPageCount);
                   return (
                     <button
                       key={side}
@@ -1402,14 +1523,14 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                       tabIndex={isSideDisabled ? -1 : 0}
                       onClick={() => {
                         if (isCustomRange) return;
-                        if (side === 'Back to Back' && isSinglePageSingleCopy) {
+                        if (side === 'Back to Back' && isBackToBackDisabledByPageCount) {
                           toast.info('Back-to-Back is disabled for 1-page documents with 1 copy. Increase copies to enable.');
                           return;
                         }
                         updatePrintConfig({ sides: side });
                       }}
                       title={
-                        side === 'Back to Back' && isSinglePageSingleCopy
+                        side === 'Back to Back' && isBackToBackDisabledByPageCount
                           ? 'Disabled: Back-to-Back requires multiple pages or copies > 1'
                           : !isSelectableForSelectedType
                           ? 'This print mode is not offered for the selected shop and paper.'
@@ -1462,17 +1583,17 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
               </div>
 
               <div className={`flex items-center gap-1.5 bg-slate-100 p-0.5 rounded-xl shrink-0 ${isCustomRange ? 'pointer-events-none' : ''}`}>
-                <button
+                {isPrintTypeVisible('Color') && <button
                   type="button"
                   disabled={
                     isCustomRange ||
-                    !isEligibilityReady ||
+                    !isConfigurationEligibilityReady ||
                     !hasSelectablePrintType('Color')
                   }
                   tabIndex={isCustomRange ? -1 : 0}
                   onClick={() => updatePrintConfig({ printType: 'Color' })}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1.5 ${
-                    !isEligibilityReady ||
+                    !isConfigurationEligibilityReady ||
                     !hasSelectablePrintType('Color')
                       ? 'opacity-40 cursor-not-allowed text-slate-400'
                       : currentPrintType === 'Color'
@@ -1488,19 +1609,19 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                       background: 'conic-gradient(from 0deg, #ff0000, #ff7700, #ffdd00, #00dd55, #00bbee, #2255ee, #aa00dd, #ff0000)'
                     }}
                   />
-                </button>
+                </button>}
 
-                <button
+                {isPrintTypeVisible('Black & White') && <button
                   type="button"
                   disabled={
                     isCustomRange ||
-                    !isEligibilityReady ||
+                    !isConfigurationEligibilityReady ||
                     !hasSelectablePrintType('Black & White')
                   }
                   tabIndex={isCustomRange ? -1 : 0}
                   onClick={() => updatePrintConfig({ printType: 'Black & White' })}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1.5 ${
-                    !isEligibilityReady ||
+                    !isConfigurationEligibilityReady ||
                     !hasSelectablePrintType('Black & White')
                       ? 'opacity-40 cursor-not-allowed text-slate-400'
                       : currentPrintType === 'Black & White'
@@ -1516,7 +1637,7 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                       background: 'linear-gradient(to bottom, #000000 50%, #ffffff 50%)'
                     }}
                   />
-                </button>
+                </button>}
               </div>
 
             </div>
@@ -1868,7 +1989,10 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
                               const isSinglePage = !isNaN(fromNum) && !isNaN(toNum) && fromNum === toNum;
                               const isB2BDisabled =
                                 !isPrintModeSelectable(rule.printType, 'Back to Back') ||
-                                (isSinglePage && printConfig.copies <= 1);
+                                isBackToBackRestrictedByPageCount(
+                                  serviceMode,
+                                  isSinglePage && printConfig.copies <= 1
+                                );
                               return (
                                 <button
                                   type="button"
@@ -2197,7 +2321,7 @@ export const UploadConfigurationView: React.FC<UploadConfigurationViewProps> = (
           fileName={currentDoc?.fileName || 'image.png'}
           initialEditing={currentDoc?.imageEditing}
           pageSize={printConfig.pageSize || 'A4'}
-          availablePageSizes={availablePaperSizes}
+          availablePageSizes={selectablePaperSizes}
           orientation={printConfig.layout || 'Portrait'}
           onOrientationChange={newOrient => updatePrintConfig({ layout: newOrient })}
           onPageSizeChange={size => updatePrintConfig({ pageSize: size as any })}

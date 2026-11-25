@@ -44,6 +44,11 @@ export interface PrintEnterprise {
   longitude?: number;
   isOpen?: boolean;
   phone: string;
+  apmEnabled?: boolean;
+  softwareServiceEnabled?: boolean;
+  apmMachineTypes?: string[];
+  apmPrinterConfigs?: Record<string, string>;
+  apmPagePrices?: Record<string, number>;
   rating: number;
   totalOrders: number;
   terminalCode: string;
@@ -229,6 +234,7 @@ export interface PrintConfig {
   selectedPageRange: string; // explicitly user-entered, e.g. "1-3, 5" (no static default)
   customRanges?: CustomPageRangeRule[];
   pagesPerSheet: '1-in-1' | '2-in-1' | '4-in-1';
+  serviceMode?: 'Self-Service' | 'Counter';
   excelScaling?: 'No Scaling' | 'Fit Sheet on One Page' | 'Fit All Columns on One Page' | 'Fit All Rows on One Page';
 }
 

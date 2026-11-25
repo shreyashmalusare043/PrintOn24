@@ -56,6 +56,7 @@ export const ScanView: React.FC<ScanViewProps> = ({ onProceedToUpload }) => {
   const [torchAvailable, setTorchAvailable] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
   const [lastScannedRaw, setLastScannedRaw] = useState<string | null>(null);
+  const [scannedTokenId, setScannedTokenId] = useState<string | null>(null);
 
   // Auto-suggestion & Shop Directory states
   const [isDirectoryOpen, setIsDirectoryOpen] = useState(false);
@@ -158,6 +159,19 @@ export const ScanView: React.FC<ScanViewProps> = ({ onProceedToUpload }) => {
       if (hasTriggeredPair.current) return;
       const clean = decodedText.trim();
       if (!clean) return;
+
+      const tokenIdMatch = clean.match(/^TK-\d{3}$/i);
+      if (tokenIdMatch) {
+        hasTriggeredPair.current = true;
+        const tokenId = tokenIdMatch[0].toUpperCase();
+        setScannedTokenId(tokenId);
+        setIsValidating(false);
+        playScanChime();
+        stopCameraStream();
+        setIsDetected(true);
+        toast.success(`Token ID: ${tokenId}`);
+        return;
+      }
 
       // Extract a shop code if encoded in a shop URL or prefixed QR value.
       let targetCode = clean;
@@ -445,6 +459,12 @@ export const ScanView: React.FC<ScanViewProps> = ({ onProceedToUpload }) => {
         {/* Live Status Pill */}
 
       </div>
+      {scannedTokenId && (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+          <p className="text-xs font-semibold text-emerald-800">Token ID scanned</p>
+          <p className="mt-1 break-all font-mono text-sm font-bold text-slate-900">{scannedTokenId}</p>
+        </div>
+      )}
       {/* 2. Interactive Real-Time Camera Viewfinder */}
       <div className="relative overflow-hidden rounded-3xl p-4 shadow-xl text-white border-solid border-[0.8px] border-[#ffffff] bg-[transparent00] bg-none">
         {/* Top Controls Overlay */}

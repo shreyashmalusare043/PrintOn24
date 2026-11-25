@@ -121,85 +121,6 @@ $$;
 
 
 --
--- Name: create_payu_transaction("text", "text", "text", numeric, "text", "text", "text", "text"); Type: FUNCTION; Schema: public; Owner: -
---
-
-CREATE OR REPLACE FUNCTION "public"."create_payu_transaction"("p_user_id" "text", "p_shop_id" "text", "p_order_id" "text", "p_amount" numeric, "p_product_info" "text", "p_customer_name" "text", "p_customer_email" "text", "p_customer_phone" "text") RETURNS "jsonb"
-    LANGUAGE "plpgsql" SECURITY DEFINER
-    AS $$
-DECLARE
-  v_key text := 'nD7EiA';
-  v_salt text := '9zvMlieMhahQa81Y2Y1EGoQlhPBmR9pf';
-  v_txnid text;
-  v_hash_string text;
-  v_hash text;
-  v_shop_name text := '';
-  v_shop_upi text := '';
-  v_shop_bank text := '';
-BEGIN
-  v_txnid := 'TXN_' || to_char(now(), 'YYYYMMDDHH24MISS') || '_' || floor(random() * 9000 + 1000)::text;
-
-  SELECT name, COALESCE(upi_id, ''), COALESCE(bank_account_no, '')
-  INTO v_shop_name, v_shop_upi, v_shop_bank
-  FROM public.print_shops
-  WHERE id = p_shop_id;
-
-  -- PayU hash format: sha512(key|txnid|amount|productinfo|firstname|email|udf1|udf2|udf3|udf4|udf5||||||SALT)
-  -- udf1 = shop_id, udf2 = user_id, udf3 = order_id
-  v_hash_string := v_key || '|' || v_txnid || '|' || trim(to_char(p_amount, 'FM999999990.00')) || '|' ||
-                   p_product_info || '|' || COALESCE(p_customer_name, 'Customer') || '|' ||
-                   COALESCE(p_customer_email, 'customer@printon24.io') || '|' ||
-                   p_shop_id || '|' || p_user_id || '|' || COALESCE(p_order_id, '') || '||||||||' || v_salt;
-
-  v_hash := encode(digest(v_hash_string, 'sha512'), 'hex');
-
-  -- Record initiated payment record
-  INSERT INTO public.payments (
-    id, order_id, user_id, shop_id,
-    payu_txnid, payu_hash, amount, currency,
-    payment_method, payment_status,
-    split_settlement_info, created_at
-  ) VALUES (
-    'pay_' || v_txnid,
-    p_order_id,
-    p_user_id,
-    p_shop_id,
-    v_txnid,
-    v_hash,
-    p_amount,
-    'INR',
-    'PayU',
-    'INITIATED',
-    jsonb_build_object(
-      'shop_id', p_shop_id,
-      'shop_name', v_shop_name,
-      'shop_upi', v_shop_upi,
-      'routed_account', COALESCE(NULLIF(v_shop_upi, ''), v_shop_bank, 'Shopkeeper Primary Vault'),
-      'settlement_type', 'Split Settlement'
-    ),
-    now()
-  );
-
-  RETURN jsonb_build_object(
-    'success', true,
-    'key', v_key,
-    'txnid', v_txnid,
-    'amount', trim(to_char(p_amount, 'FM999999990.00')),
-    'productinfo', p_product_info,
-    'firstname', COALESCE(p_customer_name, 'Customer'),
-    'email', COALESCE(p_customer_email, 'customer@printon24.io'),
-    'phone', COALESCE(p_customer_phone, '9999999999'),
-    'hash', v_hash,
-    'udf1', p_shop_id,
-    'udf2', p_user_id,
-    'udf3', COALESCE(p_order_id, ''),
-    'shop_name', v_shop_name,
-    'routed_account', COALESCE(NULLIF(v_shop_upi, ''), v_shop_bank, 'Shopkeeper Primary Vault')
-  );
-END;
-$$;
-
-
 --
 -- Name: resolve_shop_by_qr("text"); Type: FUNCTION; Schema: public; Owner: -
 --
@@ -228,100 +149,6 @@ $$;
 
 
 --
--- Name: verify_payu_payment("text", "text", "text", "text", "text", numeric, "text", "text"); Type: FUNCTION; Schema: public; Owner: -
---
-
-CREATE OR REPLACE FUNCTION "public"."verify_payu_payment"("p_txnid" "text", "p_mihpayid" "text", "p_status" "text", "p_order_id" "text", "p_shop_id" "text", "p_amount" numeric, "p_user_id" "text", "p_membership_id" "text" DEFAULT NULL::"text") RETURNS "jsonb"
-    LANGUAGE "plpgsql" SECURITY DEFINER
-    AS $$
-DECLARE
-  v_shop record;
-  v_commission numeric := 0;
-  v_net_payable numeric := p_amount;
-BEGIN
-  -- Verify shop exists
-  SELECT * INTO v_shop FROM public.print_shops WHERE id = p_shop_id;
-
-  -- 1. Update payments table
-  UPDATE public.payments
-  SET 
-    payu_mihpayid = p_mihpayid,
-    payment_status = CASE WHEN lower(p_status) IN ('success', 'paid') THEN 'PAID' ELSE 'FAILED' END
-  WHERE payu_txnid = p_txnid;
-
-  IF NOT FOUND THEN
-    INSERT INTO public.payments (
-      id, order_id, user_id, shop_id,
-      payu_txnid, payu_mihpayid, amount, currency,
-      payment_method, payment_status, created_at
-    ) VALUES (
-      'pay_' || p_txnid, p_order_id, p_user_id, p_shop_id,
-      p_txnid, p_mihpayid, p_amount, 'INR',
-      'PayU',
-      CASE WHEN lower(p_status) IN ('success', 'paid') THEN 'PAID' ELSE 'FAILED' END,
-      now()
-    );
-  END IF;
-
-  -- 2. If Order ID exists, update print_orders
-  IF p_order_id IS NOT NULL AND p_order_id != '' THEN
-    UPDATE public.print_orders
-    SET 
-      payment_method = 'PayU Online',
-      payment_status = 'PAID',
-      order_status = 'Queued',
-      payu_txnid = p_txnid,
-      payu_payment_id = p_mihpayid
-    WHERE id = p_order_id;
-  END IF;
-
-  -- 3. Log into shop_settlements for PayU split settlement to shopkeeper
-  IF lower(p_status) IN ('success', 'paid') AND p_shop_id IS NOT NULL THEN
-    v_commission := round(p_amount * 0.05, 2);
-    v_net_payable := p_amount - v_commission;
-
-    INSERT INTO public.shop_settlements (
-      id, shop_id, shop_name, total_orders,
-      gross_amount, platform_commission, net_payable,
-      settlement_cycle, status, bank_account_no, paid_at, created_at
-    ) VALUES (
-      'stl_' || to_char(now(), 'YYYYMMDDHH24MISS') || '_' || floor(random() * 900 + 100)::text,
-      p_shop_id,
-      COALESCE(v_shop.name, 'Shop Partner'),
-      1,
-      p_amount,
-      v_commission,
-      v_net_payable,
-      'Instant PayU Split Settlement',
-      'COMPLETED',
-      COALESCE(v_shop.upi_id, v_shop.bank_account_no, 'Direct PayU Routed Account'),
-      now(),
-      now()
-    );
-  END IF;
-
-  -- 4. If membership purchase
-  IF p_membership_id IS NOT NULL AND p_membership_id != '' AND lower(p_status) IN ('success', 'paid') THEN
-    UPDATE public.user_memberships
-    SET 
-      is_active = true,
-      updated_at = now()
-    WHERE id = p_membership_id;
-  END IF;
-
-  RETURN jsonb_build_object(
-    'success', true,
-    'verified', lower(p_status) IN ('success', 'paid'),
-    'txnid', p_txnid,
-    'mihpayid', p_mihpayid,
-    'order_id', p_order_id,
-    'shop_id', p_shop_id,
-    'status', p_status
-  );
-END;
-$$;
-
-
 SET default_tablespace = '';
 
 SET default_table_access_method = "heap";
@@ -753,6 +580,11 @@ CREATE TABLE IF NOT EXISTS "public"."print_shops" (
     "membership_price" numeric DEFAULT 99.0,
     "membership_validity_days" integer DEFAULT 30,
     "services" "jsonb" DEFAULT '["Xerox", "Color Printing", "Spiral Binding", "Lamination", "Document Scanning", "Photo Glossy Print"]'::"jsonb",
+    "apm_enabled" boolean DEFAULT false,
+    "software_service_enabled" boolean DEFAULT true,
+    "apm_machine_type" "jsonb" DEFAULT '[]'::"jsonb",
+    "apm_printer_configs" "jsonb" DEFAULT '{}'::"jsonb",
+    "apm_page_prices" "jsonb" DEFAULT '{}'::"jsonb",
     "logo_url" "text",
     "banner_url" "text",
     "city" "text" DEFAULT 'Pune'::"text",

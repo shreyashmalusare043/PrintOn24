@@ -18,6 +18,7 @@ import {
 import { supabase } from '../db/supabase';
 import { hashPassword, validatePasswordRules } from '../lib/authSecurity';
 import { isPrintModeEligible } from '../lib/printEligibility';
+import { getApmPagePrice, isApmPrintModeEligible } from '../lib/shopApmMode';
 import {
   updateUserProfile as apiUpdateUserProfile,
   convertDocumentViaBackend,
@@ -414,7 +415,12 @@ interface PrintPerfectContextType {
   orders: PrintOrder[];
   activeReceiptOrder: PrintOrder | null;
   setActiveReceiptOrder: (order: PrintOrder | null) => void;
-  createOrder: (paymentMethod: PaymentMethod, paymentDetail?: string, customerName?: string) => PrintOrder;
+  createOrder: (
+    paymentMethod: PaymentMethod,
+    paymentDetail?: string,
+    customerName?: string,
+    orderId?: string
+  ) => PrintOrder;
   notifications: AppNotification[];
   unreadNotifCount: number;
   markNotificationAsRead: (id: string) => void;
@@ -675,6 +681,11 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
                 id: rs.id,
                 name: rs.name,
                 address: rs.address,
+                apmEnabled: rs.apmEnabled,
+                softwareServiceEnabled: rs.softwareServiceEnabled,
+                apmMachineTypes: rs.apmMachineTypes,
+                apmPrinterConfigs: rs.apmPrinterConfigs,
+                apmPagePrices: rs.apmPagePrices,
                 terminalCode: rs.terminalCode,
                 latitude: rs.latitude,
                 longitude: rs.longitude,
@@ -691,6 +702,11 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
                 name: rs.name,
                 shortCode: getShopInitials(rs.name),
                 address: rs.address,
+                apmEnabled: rs.apmEnabled,
+                softwareServiceEnabled: rs.softwareServiceEnabled,
+                apmMachineTypes: rs.apmMachineTypes,
+                apmPrinterConfigs: rs.apmPrinterConfigs,
+                apmPagePrices: rs.apmPagePrices,
                 phone: rs.phone,
                 terminalCode: rs.terminalCode,
                 latitude: rs.latitude,
@@ -1329,7 +1345,8 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
       pageRangeType: 'All Pages',
       selectedPageRange: '',
       customRanges: [],
-      pagesPerSheet: '1-in-1'
+      pagesPerSheet: '1-in-1',
+      serviceMode: printConfig.serviceMode
     };
 
     const newDoc: UploadedDoc = {
@@ -1828,7 +1845,8 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
       pageRangeType: 'All Pages',
       selectedPageRange: '',
       customRanges: [],
-      pagesPerSheet: '1-in-1'
+      pagesPerSheet: '1-in-1',
+      serviceMode: printConfig.serviceMode
     };
     setPrintConfig(defaultCfg);
     if (currentDoc) {
@@ -1889,10 +1907,28 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
     });
 
     const pricing = selectedEnterprise.pricing;
-    if (!pricing.isConfigured || pricing.shopId !== selectedEnterprise.id) {
+    const isApmServiceMode = selectedEnterprise.apmEnabled === true &&
+      (selectedEnterprise.softwareServiceEnabled === false || cfg.serviceMode === 'Self-Service');
+    const apmPagePrices = selectedEnterprise.apmPagePrices;
+    const hasShopPricing = pricing.isConfigured && pricing.shopId === selectedEnterprise.id;
+    const hasApmPricing = isApmServiceMode &&
+      (hasShopPricing || (['Black & White', 'Color'] as const).some(printType =>
+        (['Single Side', 'Back to Back'] as const).some(sides =>
+          getApmPagePrice(
+            selectedEnterprise.apmMachineTypes,
+            apmPagePrices,
+            printType,
+            sides
+          ) !== null
+        )
+      ));
+    if (!isApmServiceMode && !hasShopPricing) {
       return invalidPrice(`Pricing for ${selectedEnterprise.name} is not available yet.`);
     }
-    if (pricing.eligibilitySettingsLoaded !== true) {
+    if (isApmServiceMode && !hasApmPricing) {
+      return invalidPrice(`APM pricing for ${selectedEnterprise.name} is unavailable.`);
+    }
+    if (!isApmServiceMode && pricing.eligibilitySettingsLoaded !== true) {
       return invalidPrice(`Print eligibility settings for ${selectedEnterprise.name} are unavailable.`);
     }
 
@@ -1928,7 +1964,25 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
     const isBackToBack = (sides: string) => sides === 'Back to Back' || sides === 'Back-to-Back';
     const normalizePaperName = (value: string) => value.toLowerCase().replace(/\s+paper$/, '').trim();
+    const isEligibleForSelectedService = (paperSize: string, printType: string, sides: string) =>
+      isApmServiceMode
+        ? isApmPrintModeEligible(
+            selectedEnterprise.apmMachineTypes,
+            printType,
+            sides
+          )
+        : isPrintModeEligible(pricing, paperSize, printType, sides);
     const resolvePageRate = (printType: string, sides: string): number | null => {
+      const apmFallbackRate = isApmServiceMode
+        ? getApmPagePrice(
+          selectedEnterprise.apmMachineTypes,
+          apmPagePrices,
+          printType,
+          sides
+        )
+        : null;
+      if (isApmServiceMode && !hasShopPricing) return apmFallbackRate;
+
       const isBW = printType === 'Black & White' || printType === 'B&W';
       const isCostone = printType === 'Costone';
       const doubleSide = isBackToBack(sides);
@@ -1964,17 +2018,23 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
           ? doubleSide ? sizeRates.bwDouble : sizeRates.bwSingle
           : doubleSide ? sizeRates.colorDouble : sizeRates.colorSingle);
       const baseRate = configuredRate ?? getDynamicRate(sizeDynamicType);
-      if (baseRate === undefined || !Number.isFinite(baseRate) || baseRate < 0) return null;
+      if (baseRate === undefined || !Number.isFinite(baseRate) || baseRate < 0) {
+        return apmFallbackRate;
+      }
 
       const needsBondRate = selectedPageSize === 'Bond' || cfg.paperType === 'Bond Paper';
       const needsGlossyRate = selectedPageSize === 'Glossy' || cfg.paperType === 'Glossy';
       if (needsBondRate) {
-        return pricing.bondPaperRate === undefined ? null : baseRate + pricing.bondPaperRate;
+        return pricing.bondPaperRate === undefined
+          ? apmFallbackRate
+          : baseRate + pricing.bondPaperRate;
       }
       if (needsGlossyRate) {
-        return pricing.glossyPaperRate === undefined ? null : baseRate + pricing.glossyPaperRate;
+        return pricing.glossyPaperRate === undefined
+          ? apmFallbackRate
+          : baseRate + pricing.glossyPaperRate;
       }
-      if (cfg.paperType !== 'Normal') return null;
+      if (cfg.paperType !== 'Normal') return apmFallbackRate;
       return baseRate;
     };
 
@@ -1982,10 +2042,13 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
     const sides = cfg.sides || 'Single Side';
     const isBackToBackPrint = isBackToBack(sides);
     const isBlackAndWhite = printType === 'Black & White' || printType === 'B&W';
-    const pricingMode = isBlackAndWhite
+    const pricingMode = isApmServiceMode && !hasShopPricing
+      ? 'page'
+      : isBlackAndWhite
       ? pricing.bwPricingMode
       : pricing.colorPricingMode;
     const shortDocumentRate = (type: string, regularRate: number) => {
+      if (isApmServiceMode && !hasShopPricing) return regularRate;
       const limit = pricing.shortPageLimit ?? 0;
       if (limit <= 0 || totalOrderPages > limit) return regularRate;
       const isBW = type === 'Black & White' || type === 'B&W';
@@ -1998,7 +2061,7 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
       : cfg.pageSize;
     if (
       !isCustomRange &&
-      !isPrintModeEligible(pricing, selectedPaper, printType, sides)
+      !isEligibleForSelectedService(selectedPaper, printType, sides)
     ) {
       return invalidPrice(`${printType} ${sides} printing is unavailable for ${selectedPaper} at ${selectedEnterprise.name}. Select an available print mode.`);
     }
@@ -2030,7 +2093,7 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
           const pagePrintType = matchingRule.printType;
           const pageSides = matchingRule.sides;
 
-          if (!isPrintModeEligible(pricing, selectedPaper, pagePrintType, pageSides)) {
+          if (!isEligibleForSelectedService(selectedPaper, pagePrintType, pageSides)) {
             return invalidPrice(`${pagePrintType} ${pageSides} printing is unavailable for ${cfg.pageSize} at ${selectedEnterprise.name}.`);
           }
 
@@ -2061,7 +2124,9 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
           if (rate !== null) {
             const groupIsBlackAndWhite =
               group.printType === 'Black & White' || group.printType === 'B&W';
-            const groupPricingMode = groupIsBlackAndWhite
+            const groupPricingMode = isApmServiceMode
+              ? 'page'
+              : groupIsBlackAndWhite
               ? pricing.bwPricingMode
               : pricing.colorPricingMode;
             const billableUnits = isBackToBack(group.sides) && groupPricingMode === 'page'
@@ -2104,7 +2169,10 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
   };
 
   const getDocPrice = (doc: UploadedDoc): PriceCalculation => {
-    const cfg = getDocPrintConfig(doc);
+    const cfg = {
+      ...getDocPrintConfig(doc),
+      serviceMode: printConfig.serviceMode
+    };
     return calculateSingleDocPrice(doc, cfg, aggregatePrintPages);
   };
 
@@ -2206,7 +2274,12 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   const [activeReceiptOrder, setActiveReceiptOrder] = useState<PrintOrder | null>(null);
 
-  const createOrder = (paymentMethod: PaymentMethod, paymentDetail?: string, customerName?: string): PrintOrder => {
+  const createOrder = (
+    paymentMethod: PaymentMethod,
+    paymentDetail?: string,
+    customerName?: string,
+    orderId?: string
+  ): PrintOrder => {
     const calc = calculatePrice();
     if (!calc.isValid) {
       toast.error(calc.error || 'This shop has no valid price configured for the selected print options.');
@@ -2221,7 +2294,7 @@ export const PrintPerfectProvider: React.FC<{ children: React.ReactNode }> = ({ 
     const generatedOrderNumber = `ORD-${uniqueTimestamp}${uniqueRandom}-${selectedEnterprise.shortCode}`;
 
     const newOrder: PrintOrder = {
-      id: `ord_${Date.now()}_${uniqueRandom}`,
+      id: orderId || `ord_${Date.now()}_${uniqueRandom}`,
       orderNumber: generatedOrderNumber,
       tokenNumber: tokenNum,
       userId: user.id,

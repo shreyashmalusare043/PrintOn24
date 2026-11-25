@@ -264,14 +264,17 @@ const PrintPerfectAppContent: React.FC = () => {
     const errorMsg = params.get('error');
 
     if (payStatus === 'success') {
-      toast.success(`Payment verified via PayU! Txn: ${txnid ? txnid.slice(-8) : 'Confirmed'}`);
       window.history.replaceState({}, '', window.location.pathname);
       const matched = orders.find(o => o.id === orderId || (txnid && o.paymentOptionDetail?.includes(txnid)));
       if (matched) {
+        toast.success(`Payment verified via PayU! Txn: ${txnid ? txnid.slice(-8) : 'Confirmed'}`);
         setActiveReceiptOrder(matched);
+        setCurrentView('thermal_receipt');
+        scheduleAppDownloadSuggestion();
+      } else {
+        toast.success('PayU payment verified. Return to your checkout tab and select “Check Verification” to place the order.');
+        setCurrentView('checkout');
       }
-      setCurrentView('thermal_receipt');
-      scheduleAppDownloadSuggestion();
     } else if (payStatus === 'failed') {
       toast.error(`PayU Payment Failed or Cancelled: ${errorMsg ? decodeURIComponent(errorMsg) : 'Transaction declined'}`);
       window.history.replaceState({}, '', window.location.pathname);

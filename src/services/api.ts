@@ -239,6 +239,11 @@ export interface RemoteShopData {
   id: string;
   name: string;
   address: string;
+  apmEnabled: boolean;
+  softwareServiceEnabled: boolean;
+  apmMachineTypes: string[];
+  apmPrinterConfigs: Record<string, string>;
+  apmPagePrices: Record<string, number>;
   terminalCode: string;
   latitude: number;
   longitude: number;
@@ -276,6 +281,33 @@ type ShopDynamicPaperTypeRow = {
   eligible_color_single?: boolean;
   eligible_color_back_to_back?: boolean;
 };
+
+function mapApmPagePrices(value: unknown): Record<string, number> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+
+  return Object.fromEntries(
+    Object.entries(value).flatMap(([machineType, rawPrice]) => {
+      if (typeof rawPrice !== 'number' && typeof rawPrice !== 'string') return [];
+      if (typeof rawPrice === 'string' && rawPrice.trim() === '') return [];
+      const price = Number(rawPrice);
+      if (!Number.isFinite(price) || price < 0) return [];
+      const normalizedType = machineType.trim().toLowerCase().replace(/[\s-]+/g, '_');
+      return normalizedType ? [[normalizedType, price]] : [];
+    })
+  );
+}
+
+function mapApmPrinterConfigs(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+
+  return Object.fromEntries(
+    Object.entries(value).flatMap(([machineType, printerId]) => {
+      if (typeof printerId !== 'string' || !printerId.trim()) return [];
+      const normalizedType = machineType.trim().toLowerCase().replace(/[\s-]+/g, '_');
+      return normalizedType ? [[normalizedType, printerId]] : [];
+    })
+  );
+}
 
 async function getShopDynamicPaperTypeRows(shopId: string): Promise<ShopDynamicPaperTypeRow[]> {
   const { data, error } = await supabase
@@ -531,6 +563,13 @@ export async function getPrintShops(): Promise<RemoteShopData[]> {
         id: shop.id,
         name: shop.name,
         address: shop.address,
+        apmEnabled: shop.apm_enabled === true,
+        softwareServiceEnabled: shop.software_service_enabled !== false,
+        apmMachineTypes: Array.isArray(shop.apm_machine_type)
+          ? shop.apm_machine_type.filter((machineType: unknown): machineType is string => typeof machineType === 'string')
+          : [],
+        apmPrinterConfigs: mapApmPrinterConfigs(shop.apm_printer_configs),
+        apmPagePrices: mapApmPagePrices(shop.apm_page_prices),
         terminalCode: shop.terminal_code || shop.shop_code || shop.id,
         latitude: Number(shop.latitude) || 18.5204,
         longitude: Number(shop.longitude) || 73.8567,
@@ -575,6 +614,13 @@ export async function findShopByCodeOrId(identifier: string): Promise<RemoteShop
       id: data.id,
       name: data.name,
       address: data.address,
+      apmEnabled: data.apm_enabled === true,
+      softwareServiceEnabled: data.software_service_enabled !== false,
+      apmMachineTypes: Array.isArray(data.apm_machine_type)
+        ? data.apm_machine_type.filter((machineType: unknown): machineType is string => typeof machineType === 'string')
+        : [],
+      apmPrinterConfigs: mapApmPrinterConfigs(data.apm_printer_configs),
+      apmPagePrices: mapApmPagePrices(data.apm_page_prices),
       terminalCode: data.terminal_code || data.shop_code || data.id,
       latitude: Number(data.latitude || 18.5204),
       longitude: Number(data.longitude || 73.8567),
@@ -681,6 +727,13 @@ export function mapDbShopToEnterprise(shop: any, shopPricing?: ShopPricingRow | 
     category: 'Digital Printing & Xerox Center',
     address: shop.address || 'Pune, Maharashtra',
     phone: shop.phone || '+91 98220 11223',
+    apmEnabled: shop.apm_enabled === true,
+    softwareServiceEnabled: shop.software_service_enabled !== false,
+    apmMachineTypes: Array.isArray(shop.apm_machine_type)
+      ? shop.apm_machine_type.filter((machineType: unknown): machineType is string => typeof machineType === 'string')
+      : [],
+    apmPrinterConfigs: mapApmPrinterConfigs(shop.apm_printer_configs),
+    apmPagePrices: mapApmPagePrices(shop.apm_page_prices),
     rating: Number(shop.rating || 4.9),
     totalOrders: shop.totalReviews || shop.total_reviews || 0,
     terminalCode: shop.terminal_code || shop.terminalCode || shop.shop_code || shop.id,
@@ -1056,6 +1109,9 @@ export interface PayUInitiationResult {
   surl: string;
   furl: string;
   hash: string;
+  udf1?: string;
+  udf2?: string;
+  udf3?: string;
   split_settlement_info?: any;
 }
 
@@ -1068,7 +1124,8 @@ export async function createPayUPaymentViaEdge(payload: {
   order_id?: string;
   shop_id?: string;
   user_id?: string;
-}): Promise<PayUInitiationResult | null> {
+  service_mode?: 'Self-Service' | 'Counter';
+}): Promise<PayUInitiationResult> {
   try {
     const { data, error } = await supabase.functions.invoke('payu-checkout', {
       body: {
@@ -1080,13 +1137,21 @@ export async function createPayUPaymentViaEdge(payload: {
         phone: payload.phone,
         order_id: payload.order_id,
         shop_id: payload.shop_id,
-        user_id: payload.user_id
+        user_id: payload.user_id,
+        service_mode: payload.service_mode
       }
     });
 
     if (error || !data?.success) {
-      console.error('createPayUPaymentViaEdge failed:', error || data);
-      return null;
+      let message = data?.error;
+      if (!message && error && 'context' in error && error.context instanceof Response) {
+        const errorBody = await error.context.clone().json().catch(() => null);
+        if (errorBody && typeof errorBody === 'object' && 'error' in errorBody) {
+          message = String(errorBody.error);
+        }
+      }
+      message ||= error instanceof Error ? error.message : 'PayU could not initialize the payment.';
+      throw new Error(message);
     }
 
     return {
@@ -1101,11 +1166,14 @@ export async function createPayUPaymentViaEdge(payload: {
       surl: data.surl,
       furl: data.furl,
       hash: data.hash,
+      udf1: data.udf1,
+      udf2: data.udf2,
+      udf3: data.udf3,
       split_settlement_info: data.split_settlement_info
     };
   } catch (err) {
     console.error('createPayUPaymentViaEdge exception:', err);
-    return null;
+    throw err;
   }
 }
 
